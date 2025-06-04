@@ -51,6 +51,11 @@ const TEMPLATE_ID = '1707168926925165526';
 // const bcrypt = require('bcrypt'); // Assuming bcrypt is used for hashing passwords
 
 
+app.get("/", (res,res)=>{
+    res.send("Naphex Game Bakcend Is Running!")
+})
+
+
 app.post('/login', async (req, res) => {
     const { phoneNo, password } = req.body;
 
