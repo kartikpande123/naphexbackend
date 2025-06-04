@@ -22,6 +22,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // if you use cookies/auth headers
 }));
+app.options('*', cors()); // enable pre-flight for all routes
 
 
 //Multer for file uploads 
