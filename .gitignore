@@ -1,0 +1,24 @@
+# Node modules
+node_modules/
+
+# Firebase admin SDK key
+db/naphex-game-firebase-adminsdk-w1i8b-c9d9d5710c.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Optional: build outputs if any
+dist/
+build/
+
+# PM2 logs (if using)
+pids
+*.pid
+*.seed
+*.pid.lock
