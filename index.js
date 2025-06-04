@@ -16,7 +16,7 @@ const app = express();
 //Midllewares
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
-const cors = require('cors');
+// const cors = require('cors');
 
 const allowedOrigins = ['https://naphex.com', 'https://www.naphex.com'];
 
