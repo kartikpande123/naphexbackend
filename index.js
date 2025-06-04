@@ -16,13 +16,23 @@ const app = express();
 //Midllewares
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+const cors = require('cors');
+
+const allowedOrigins = ['https://naphex.com', 'https://www.naphex.com'];
+
 app.use(cors({
-  origin: ['https://naphex.com', 'https://www.naphex.com',"http://localhost:3200"],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true, // if you use cookies/auth headers
+  origin: function(origin, callback){
+    // allow requests with no origin (like mobile apps, curl)
+    if(!origin) return callback(null, true);
+    if(allowedOrigins.indexOf(origin) === -1){
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true // if you want to send cookies/auth headers
 }));
-app.options('*', cors()); // enable pre-flight for all routes
+
 
 
 //Multer for file uploads 
