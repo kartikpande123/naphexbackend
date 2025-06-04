@@ -16,12 +16,16 @@ const app = express();
 //Midllewares
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
-const corsOptions = {
-  origin: ['https://naphex.com', 'https://www.naphex.com', 'http://localhost:3000', 'http://localhost:3200'],
-  credentials: true
-};
+app.use(cors({
+  // Allow requests from all origins
+  origin: '*',
+  // If you need to allow credentials (cookies, authorization headers)
+  // origin: 'https://yourappdomain.com', 
+  // credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
 
-app.use(cors(corsOptions));
 
 
 //Multer for file uploads 
