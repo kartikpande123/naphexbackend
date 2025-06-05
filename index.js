@@ -21,38 +21,13 @@ const app = express();
 //   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 // }));
 
-app.use((req, res, next) => {
-  // Allow all origins dynamically
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  
-  // Allow common methods
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  
-  // Allow common headers (including Authorization)
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
 
-  // Allow credentials (cookies, auth headers)
-  res.header('Access-Control-Allow-Credentials', 'true');
 
-  // For SSE: prevent caching and allow necessary headers
-  if (req.headers.accept && req.headers.accept === 'text/event-stream') {
-    res.header('Cache-Control', 'no-cache');
-    res.header('Connection', 'keep-alive');
-  }
-
-  // Handle preflight OPTIONS request fast
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204); // No Content
-  }
-  
-  next();
-});
-
-// app.use(cors({
-//   origin: true,
-//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-// }));
+app.use(cors({
+  origin: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+}));
 
 
 app.use(express.json({ limit: '20mb' }));
