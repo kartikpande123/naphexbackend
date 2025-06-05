@@ -15,17 +15,56 @@ const app = express();
 
 //Midllewares
 app.use(cors({
-  origin: true, // Allow all origins
+  origin: [
+    'https://www.naphex.com',
+    'https://naphex.com',
+    'http://localhost:3000', // for development
+    'http://localhost:3200'  // for development
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: ['*'], // Allow all headers
-  exposedHeaders: ['*'], // Expose all headers to the client
-  optionsSuccessStatus: 200 // For legacy browser support
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With', 
+    'Content-Type', 
+    'Accept', 
+    'Authorization',
+    'Cache-Control',
+    'Pragma'
+  ],
+  exposedHeaders: ['*'],
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
 
-// Optional: handle OPTIONS requests quickly
+// Handle preflight requests explicitly
 app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+  res.header('Access-Control-Allow-Credentials', 'true');
   res.sendStatus(204);
+});
+
+// Add CORS headers to all responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://www.naphex.com',
+    'https://naphex.com',
+    'http://localhost:3000',
+    'http://localhost:3002'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+  
+  next();
 });
 
 app.use(express.json({ limit: '20mb' }));
