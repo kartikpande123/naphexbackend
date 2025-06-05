@@ -15,30 +15,11 @@ const app = express();
 
 //Midllewares
 app.use(cors({
-  origin: true, // Allows any origin (more permissive than '*')
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-  allowedHeaders: ['*'], // Allow all headers
-  credentials: true, // Allow cookies and credentials
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
 
-app.use((req, res, next) => {
-  // Set CORS headers for every request
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
-  res.header('Access-Control-Allow-Headers', '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Max-Age', '86400'); // 24 hours
-  
-  // Handle preflight requests immediately
-  if (req.method === 'OPTIONS') {
-    res.status(204).send();
-    return;
-  }
-  
-  next();
-});
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
