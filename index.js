@@ -13,13 +13,13 @@ const sharp = require("sharp")
 const app = express();
 
 // Use this before all routes
-app.use(cors())
-// app.use(cors({
-//   origin: '*', // ✅ Allow all origins
-//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-//   credentials: true, // optional, only if you support cookies/auth headers
-// }));
+// app.use(cors())
+app.use(cors({
+  origin: '*', // ✅ Allow all origins
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  credentials: true, // optional, only if you support cookies/auth headers
+}));
 
 
 
