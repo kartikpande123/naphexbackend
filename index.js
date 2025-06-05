@@ -13,13 +13,38 @@ const sharp = require("sharp")
 const app = express();
 
 // Use this before all routes
-app.use(cors())
+// app.use(cors())
 // app.use(cors({
 //   origin: '*', // ✅ Allow all origins
 //   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 //   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
 //   credentials: true, // optional, only if you support cookies/auth headers
 // }));
+
+
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl, Postman)
+    if (!origin) return callback(null, true);
+
+    // You can allow specific domains here, or allow all:
+    // return callback(null, true);  // allow all origins
+
+    // Or restrict to your frontend domains:
+    const allowedOrigins = ['https://naphex.com', 'https://www.naphex.com'];
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  credentials: true, // Allow cookies and auth headers
+};
+
+app.use(cors(corsOptions));
 
 
 
