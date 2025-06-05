@@ -12,10 +12,6 @@ const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
 
-
-//Midllewares
-const cors = require('cors');
-
 // Use this before all routes
 app.use(cors({
   origin: '*', // ✅ Allow all origins
