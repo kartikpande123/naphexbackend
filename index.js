@@ -14,24 +14,16 @@ const app = express();
 
 
 //Midllewares
-// app.use(cors({
-//   // Allow requests from all origins
-//   origin: '*',
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
-// }));
-
-
-
-
 app.use(cors({
-  origin: ['https://naphex.com', 'https://www.naphex.com'],
+  origin: true, // Allow all origins
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: ['*'], // Allow all headers
+  exposedHeaders: ['*'], // Expose all headers to the client
+  optionsSuccessStatus: 200 // For legacy browser support
 }));
 
-// Optional: handle OPTIONS fast
+// Optional: handle OPTIONS requests quickly
 app.options('*', (req, res) => {
   res.sendStatus(204);
 });
