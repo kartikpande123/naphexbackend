@@ -23,12 +23,18 @@ const app = express();
 
 
 
+
 app.use(cors({
-  origin: true,
+  origin: ['https://naphex.com', 'https://www.naphex.com'],
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
 }));
 
+// Optional: handle OPTIONS fast
+app.options('*', (req, res) => {
+  res.sendStatus(204);
+});
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
