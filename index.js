@@ -19,11 +19,6 @@ app.use(cors({
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
   credentials: true, // optional, only if you support cookies/auth headers
 }));
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*"); // or your domain
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-  next();
-});
 
 
 
