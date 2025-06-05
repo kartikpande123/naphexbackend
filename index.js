@@ -23,15 +23,15 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 
-// Additional manual CORS headers for maximum compatibility
 app.use((req, res, next) => {
+  // Set CORS headers for every request
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
   res.header('Access-Control-Allow-Headers', '*');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400'); // 24 hours
   
-  // Handle preflight requests
+  // Handle preflight requests immediately
   if (req.method === 'OPTIONS') {
     res.status(204).send();
     return;
@@ -39,7 +39,6 @@ app.use((req, res, next) => {
   
   next();
 });
-
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
