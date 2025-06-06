@@ -14,8 +14,10 @@ const app = express();
 
 
 
-app.use(cors())
-
+app.use(cors({
+  origin: 'https://www.naphex.com',
+  credentials: true
+}));
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
