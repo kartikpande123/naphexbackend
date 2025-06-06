@@ -13,55 +13,15 @@ const sharp = require("sharp")
 const app = express();
 
 
-// IMPORTANT: Put HTTPS redirect BEFORE CORS only for non-preflight requests
-app.use((req, res, next) => {
-  // Prevent redirect on preflight
-  if (req.method === 'OPTIONS') return next();
-
-  if (req.headers['x-forwarded-proto'] !== 'https' && process.env.NODE_ENV === 'production') {
-    return res.redirect(301, 'https://' + req.headers.host + req.url);
-  }
-  next();
-});
-
-// ✅ CORS Middleware (allow all origins with dynamic origin check)
-const allowedOrigins = [
-  'https://www.naphex.com',
-  'https://naphex.com',
-  'http://localhost:3000',
-  'http://localhost:3200'
-];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
+  origin: ['https://www.naphex.com', 'https://naphex.com'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'Pragma'],
-  optionsSuccessStatus: 200
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  credentials: true,
 }));
 
-// 🔄 OPTIONS preflight handler
-app.options('*', cors());
-
-// 👇 Optional: set CORS headers manually (extra safety)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
-
-  next();
-});
+app.options('*', cors()); // Enable preflight for all routes
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
