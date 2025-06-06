@@ -13,57 +13,53 @@ const sharp = require("sharp")
 const app = express();
 
 
-//Midllewares
-app.use(cors({
-  origin: [
-    'https://www.naphex.com',
-    'https://naphex.com',
-    'http://localhost:3000', // for development
-    'http://localhost:3200'  // for development
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With', 
-    'Content-Type', 
-    'Accept', 
-    'Authorization',
-    'Cache-Control',
-    'Pragma'
-  ],
-  exposedHeaders: ['*'],
-  optionsSuccessStatus: 200,
-  preflightContinue: false
-}));
+// IMPORTANT: Put HTTPS redirect BEFORE CORS only for non-preflight requests
+app.use((req, res, next) => {
+  // Prevent redirect on preflight
+  if (req.method === 'OPTIONS') return next();
 
-// Handle preflight requests explicitly
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(204);
+  if (req.headers['x-forwarded-proto'] !== 'https' && process.env.NODE_ENV === 'production') {
+    return res.redirect(301, 'https://' + req.headers.host + req.url);
+  }
+  next();
 });
 
-// Add CORS headers to all responses
+// ✅ CORS Middleware (allow all origins with dynamic origin check)
+const allowedOrigins = [
+  'https://www.naphex.com',
+  'https://naphex.com',
+  'http://localhost:3000',
+  'http://localhost:3200'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'Pragma'],
+  optionsSuccessStatus: 200
+}));
+
+// 🔄 OPTIONS preflight handler
+app.options('*', cors());
+
+// 👇 Optional: set CORS headers manually (extra safety)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://www.naphex.com',
-    'https://naphex.com',
-    'http://localhost:3000',
-    'http://localhost:3002'
-  ];
-  
   if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
-  
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+
   next();
 });
 
@@ -3197,7 +3193,7 @@ const finalizeDailyAmounts = async () => {
     }
 };
 
-schedule.scheduleJob("43 12 * * *", finalizeDailyAmounts); //11:55
+schedule.scheduleJob("19 18 * * *", finalizeDailyAmounts); //11:55
 
 
 // Function to calculate total business for a user left and right update daily
@@ -3252,7 +3248,7 @@ const updateBusinessForAllUsers = async () => {
 };
 
 // Schedule the update to run at 11:55 PM daily
-schedule.scheduleJob("43 12 * * *", updateBusinessForAllUsers); //11:55
+schedule.scheduleJob("19 18 * * *", updateBusinessForAllUsers); //11:55
 
 // Bonus Step Levels
 const BONUS_STEPS = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
@@ -3420,7 +3416,7 @@ const calculateBonuses = async () => {
 };
 
 // Schedule the bonus calculation to run at 23:56 daily
-schedule.scheduleJob("44 12 * * *", calculateBonuses);
+schedule.scheduleJob("20 18 * * *", calculateBonuses);
 
 
 
