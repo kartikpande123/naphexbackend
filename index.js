@@ -21,7 +21,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow non-browser requests like curl/postman
+    if (!origin) return callback(null, true); // allow curl/postman etc.
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -31,9 +31,15 @@ app.use(cors({
   credentials: true,
 }));
 
-// Enable preflight requests
-app.options('*', cors());
+// Add headers explicitly if you want
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  next();
+});
 
+// Enable preflight requests for all routes
+app.options('*', cors());
 
 
 app.use(express.json({ limit: '20mb' }));
