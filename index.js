@@ -38,7 +38,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.options('*', cors());
 
 // Your API routes below
 
