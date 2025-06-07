@@ -13,6 +13,8 @@ const sharp = require("sharp")
 const app = express();
 
 
+const cors = require('cors');
+
 const allowedOrigins = [
   'https://naphex.com',
   'https://www.naphex.com',
@@ -29,17 +31,13 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
-app.options('*', cors()); // 👈 This must come after the above
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  next();
-});
-
+// ✅ Handle OPTIONS preflight requests
+app.options('*', cors());
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
@@ -1366,230 +1364,6 @@ function scheduleResultGeneration() {
 }
 
 scheduleResultGeneration();
-
-
-
-// app.post('/generate-game-results', async (req, res) => {
-//     try {
-//         const now = moment().tz('Asia/Kolkata');
-//         const currentDate = now.format('YYYY-MM-DD');
-
-//         // Define session times
-//         const sessions = [
-//             {
-//                 number: 'session1',
-//                 openTime: moment().tz('Asia/Kolkata').set({ hour: 12, minute: 16, second: 0 }),
-//                 closeTime: moment().tz('Asia/Kolkata').set({ hour: 17, minute: 25, second: 0 }),
-//             },
-//             {
-//                 number: 'session2',
-//                 openTime: moment().tz('Asia/Kolkata').set({ hour: 22, minute: 45, second: 0 }),
-//                 closeTime: moment().tz('Asia/Kolkata').set({ hour: 23, minute: 50, second: 0 }),
-//             },
-//         ];
-
-//         const determineSession = () => {
-//             for (const session of sessions) {
-//                 const openWindowStart = moment(session.openTime).subtract(5, 'minutes');
-//                 const openWindowEnd = moment(session.openTime).add(5, 'minutes');
-//                 const closeWindowStart = moment(session.closeTime).subtract(5, 'minutes');
-//                 const closeWindowEnd = moment(session.closeTime).add(5, 'minutes');
-
-//                 if (now.isBetween(openWindowStart, openWindowEnd)) {
-//                     return { sessionType: 'open', ...session };
-//                 }
-//                 if (now.isBetween(closeWindowStart, closeWindowEnd)) {
-//                     return { sessionType: 'close', ...session };
-//                 }
-//             }
-//             return null;
-//         };
-
-//         const sessionInfo = determineSession();
-
-//         if (!sessionInfo) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: 'Not within a valid session time',
-//                 currentTime: now.format('YYYY-MM-DD HH:mm:ss'),
-//             });
-//         }
-
-//         const { sessionType, number: sessionNumber } = sessionInfo;
-//         const generator = new SecurePayoutGenerator(process.env.SECRET_KEY || 'your-secret-key');
-
-//         const multipliers = {
-//             openPanna: 100,
-//             closePanna: 100,
-//             openNumber: 10,
-//             closeNumber: 10,
-//             openClose: 100,
-//         };
-
-//         // Firebase references
-//         const db = admin.database();
-//         const betsRef = db.ref(`/OpenCloseGameDetails/betted-numbers/${sessionNumber}`);
-//         const resultsRef = db.ref('/Results');
-
-//         // Format bets for the SecurePayoutGenerator class
-//         const formatBetsForGenerator = async () => {
-//             const formattedBets = {};
-
-//             if (sessionType === 'open') {
-//                 const [openPanaSnap, openNumberSnap] = await Promise.all([
-//                     betsRef.child('open-pana').once('value'),
-//                     betsRef.child('open-number').once('value'),
-//                 ]);
-
-//                 formattedBets['open-pana'] = openPanaSnap.val() || {};
-//                 formattedBets['open-number'] = openNumberSnap.val() || {};
-//             } else {
-//                 const [closePanaSnap, closeNumberSnap, openCloseSnap] = await Promise.all([
-//                     betsRef.child('close-pana').once('value'),
-//                     betsRef.child('close-number').once('value'),
-//                     betsRef.child('open-close').once('value'),
-//                 ]);
-
-//                 formattedBets['close-pana'] = closePanaSnap.val() || {};
-//                 formattedBets['close-number'] = closeNumberSnap.val() || {};
-//                 formattedBets['open-close'] = openCloseSnap.val() || {};
-//             }
-
-//             return formattedBets;
-//         };
-
-//         // Get and process bets
-//         const bets = await formatBetsForGenerator();
-
-//         let generatedResults;
-//         let formattedResults;
-
-//         if (sessionType === 'open') {
-//             generatedResults = await generator.processOpenResults(bets, multipliers);
-
-//             formattedResults = {
-//                 'open-number': generatedResults.openNumber,
-//                 'open-pana': generatedResults.openPanna,
-//                 'nums': `${generatedResults.openPanna} ${generatedResults.openNumber}`,
-//                 '_payout': {
-//                     openPannaPayout: generatedResults.details.openPannaPayout,
-//                     openNumberPayout: generatedResults.details.openNumberPayout,
-//                     totalPayout: generatedResults.totalOpenPayout
-//                 }
-//             };
-//         } else {
-//             // Get existing open results for close session
-//             const openResultSnap = await resultsRef.child(currentDate).child(sessionNumber).once('value');
-//             const openResult = openResultSnap.val();
-
-//             if (!openResult || !openResult['open-pana'] || !openResult['open-number']) {
-//                 throw new Error('Open results required for close session processing');
-//             }
-
-//             // Set existing open results in generator
-//             generator.results = {
-//                 openPanna: openResult['open-pana'],
-//                 openNumber: openResult['open-number'],
-//                 totalOpenPayout: openResult._payout?.totalPayout || 0
-//             };
-
-//             generatedResults = await generator.processCloseResults(bets, multipliers);
-
-//             formattedResults = {
-//                 ...openResult,
-//                 'close-number': generatedResults.closeNumber,
-//                 'close-pana': generatedResults.closePanna,
-//                 'nums': `${openResult['open-pana']} ${openResult['open-number']} ${generatedResults.closeNumber} ${generatedResults.closePanna}`,
-//                 '_payout': {
-//                     ...openResult._payout,
-//                     closePannaPayout: generatedResults.details.closePannaPayout,
-//                     closeNumberPayout: generatedResults.details.closeNumberPayout,
-//                     openClosePayout: generatedResults.details.openClosePayout,
-//                     totalPayout: generatedResults.totalClosePayout
-//                 }
-//             };
-//         }
-
-//         // Store results
-//         await resultsRef.child(currentDate).child(sessionNumber).update(formattedResults);
-
-//         res.status(200).json({
-//             success: true,
-//             message: `${sessionNumber} ${sessionType} result generated and stored successfully`,
-//             results: formattedResults,
-//             currentTime: now.format('YYYY-MM-DD HH:mm:ss'),
-//         });
-
-//     } catch (error) {
-//         console.error('Error generating game results:', error);
-//         res.status(500).json({
-//             success: false,
-//             message: 'Failed to generate game results',
-//             error: error.message,
-//         });
-//     }
-// });
-// // Cron jobs for all four sessions
-// // Session 1 Open Result at 2:30 PM
-// cron.schedule('56 11 * * *', () => {
-//     axios.post('http://localhost:3200/generate-game-results')
-//         .then(response => {
-//             console.log('Game results generated successfully:', response.data);
-//         })
-//         .catch(error => {
-//             console.error('Error generating game results:', error.response ? error.response.data : error.message);
-//         });
-// }, {
-//     timezone: 'Asia/Kolkata' // Set the timezone to Asia/Kolkata
-// });
-
-
-
-// // Session 1 Close Result at 5:25 PM
-// cron.schedule('57 11 * * *', () => {
-//     axios.post('http://localhost:3200/generate-game-results')
-//         .then(response => {
-//             console.log('Session 1 - Close result saved at 5:25 PM:', response.data);
-//         })
-//         .catch(error => {
-//             console.error('Error posting Session 1 close result:',
-//                 error.response ? error.response.data : error.message);
-//         });
-// }, {
-//     timezone: 'Asia/Kolkata' // Make sure to set the timezone to Asia/Kolkata
-// });
-
-// // Session 2 Open Result at 9:25 PM
-// cron.schedule('51 23 * * *', () => {
-//     axios.post('http://localhost:3200/generate-game-results')
-//         .then(response => {
-//             console.log('Session 2 - Open result saved at 9:25 PM:', response.data);
-//         })
-//         .catch(error => {
-//             console.error('Error posting Session 2 open result:',
-//                 error.response ? error.response.data : error.message);
-//         });
-// }, {
-//     timezone: 'Asia/Kolkata' // Make sure to set the timezone to Asia/Kolkata
-// });
-
-
-// // Session 2 Close Result at 11:50 PM
-// cron.schedule('53 23 * * *', () => {
-//     axios.post('http://localhost:3200/generate-game-results')
-//         .then(response => {
-//             console.log('Session 2 - Close result saved at 11:50 PM:', response.data);
-//         })
-//         .catch(error => {
-//             console.error('Error posting Session 2 close result:',
-//                 error.response ? error.response.data : error.message);
-//         });
-// }, {
-//     timezone: 'Asia/Kolkata' // Make sure to set the timezone to Asia/Kolkata
-// });
-
-
-
 
 //User who play open-close
 app.get('/users-with-openclose', async (req, res) => {
@@ -3983,9 +3757,6 @@ app.get("/admin-binary-tree-by-date-range", async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 });
-
-
-
 
 
 //Server
