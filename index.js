@@ -12,12 +12,26 @@ const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
 
-
+const allowedOrigins = [
+  'http://localhost:3200',
+  'http://localhost:3000',
+  'https://naphex.com',
+  'https://www.naphex.com',
+];
 
 app.use(cors({
-  origin: 'https://www.naphex.com',
+  origin: function (origin, callback) {
+    // allow requests with no origin (like curl or mobile apps)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
+
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
@@ -3149,7 +3163,7 @@ const finalizeDailyAmounts = async () => {
     }
 };
 
-schedule.scheduleJob("19 18 * * *", finalizeDailyAmounts); //11:55
+schedule.scheduleJob("08 12 * * *", finalizeDailyAmounts); //11:55
 
 
 // Function to calculate total business for a user left and right update daily
@@ -3204,7 +3218,7 @@ const updateBusinessForAllUsers = async () => {
 };
 
 // Schedule the update to run at 11:55 PM daily
-schedule.scheduleJob("19 18 * * *", updateBusinessForAllUsers); //11:55
+schedule.scheduleJob("08 12 * * *", updateBusinessForAllUsers); //11:55
 
 // Bonus Step Levels
 const BONUS_STEPS = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
@@ -3372,7 +3386,7 @@ const calculateBonuses = async () => {
 };
 
 // Schedule the bonus calculation to run at 23:56 daily
-schedule.scheduleJob("20 18 * * *", calculateBonuses);
+schedule.scheduleJob("09 12 * * *", calculateBonuses);
 
 
 
