@@ -12,6 +12,8 @@ const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
 
+const cors = require('cors');
+
 const allowedOrigins = [
   'https://naphex.com',
   'https://www.naphex.com',
@@ -21,7 +23,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow curl/postman etc.
+    if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -31,15 +33,15 @@ app.use(cors({
   credentials: true,
 }));
 
-// Add headers explicitly if you want
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   next();
 });
 
-// Enable preflight requests for all routes
 app.options('*', cors());
+
+// Your API routes below
 
 
 app.use(express.json({ limit: '20mb' }));
