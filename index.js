@@ -13,8 +13,6 @@ const sharp = require("sharp")
 const app = express();
 
 
-const cors = require('cors');
-
 const allowedOrigins = [
   'https://naphex.com',
   'https://www.naphex.com',
@@ -31,13 +29,17 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 
-// ✅ Handle OPTIONS preflight requests
-app.options('*', cors());
+app.options('*', cors()); // 👈 This must come after the above
+
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  next();
+});
+
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
@@ -458,7 +460,7 @@ app.post('/verify-otp', async (req, res) => {
 /**
  * API to send OTP
  */
-app.post('/api/send-otp', async (req, res) => {
+app.post('/send-otp', async (req, res) => {
     const { phoneNo } = req.body;
 
     // Validate the phone number
@@ -657,7 +659,7 @@ app.use((err, req, res, next) => {
 });
 
 
-app.post('/api/reset-password', async (req, res) => {
+app.post('/reset-password', async (req, res) => {
     const { phoneNo, newPassword } = req.body;
 
     // Validate request body
@@ -1365,7 +1367,7 @@ function scheduleResultGeneration() {
 
 scheduleResultGeneration();
 
-//User who play open-close
+
 app.get('/users-with-openclose', async (req, res) => {
     // Set headers for Server-Sent Events
     res.setHeader('Content-Type', 'text/event-stream');
@@ -3757,6 +3759,9 @@ app.get("/admin-binary-tree-by-date-range", async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 });
+
+
+
 
 
 //Server
