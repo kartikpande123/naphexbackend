@@ -12,7 +12,6 @@ const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
 
-const cors = require('cors');
 
 const allowedOrigins = [
   'https://naphex.com',
