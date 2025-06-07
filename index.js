@@ -460,7 +460,7 @@ app.post('/verify-otp', async (req, res) => {
 /**
  * API to send OTP
  */
-app.post('/send-otp', async (req, res) => {
+app.post('/api/send-otp', async (req, res) => {
     const { phoneNo } = req.body;
 
     // Validate the phone number
@@ -659,7 +659,7 @@ app.use((err, req, res, next) => {
 });
 
 
-app.post('/reset-password', async (req, res) => {
+app.post('/api/reset-password', async (req, res) => {
     const { phoneNo, newPassword } = req.body;
 
     // Validate request body
