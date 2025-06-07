@@ -13,24 +13,22 @@ const sharp = require("sharp")
 const app = express();
 
 const allowedOrigins = [
-  'http://localhost:3200',
-  'http://localhost:3000',
   'https://naphex.com',
   'https://www.naphex.com',
+  'http://localhost:3000',
+  'http://localhost:3200',
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // allow requests with no origin (like curl or mobile apps)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      return callback(new Error('Not allowed by CORS'));
-    }
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
+
+app.options('*', cors());
 
 
 app.use(express.json({ limit: '20mb' }));
@@ -1025,7 +1023,7 @@ async function initializeCollectionIfNeeded() {
 }
 
 // Cron jobs for cleanup
-cron.schedule('30 17 * * *', async () => {
+cron.schedule('35 17 * * *', async () => {
     try {
         const bettedNumbersRef = admin.database().ref('/OpenCloseGameDetails/betted-numbers/session-1');
         await bettedNumbersRef.remove();
@@ -1035,7 +1033,7 @@ cron.schedule('30 17 * * *', async () => {
     }
 });
 
-cron.schedule('55 23 * * *', async () => {
+cron.schedule('58 23 * * *', async () => {
     try {
         const bettedNumbersRef = admin.database().ref('/OpenCloseGameDetails/betted-numbers/session-2');
         await bettedNumbersRef.remove();
