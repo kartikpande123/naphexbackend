@@ -12,6 +12,8 @@ const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
 
+const cors = require('cors');
+
 const allowedOrigins = [
   'https://naphex.com',
   'https://www.naphex.com',
@@ -21,14 +23,19 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+    if (!origin) return callback(null, true); // allow non-browser requests like curl/postman
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
   },
-  credentials: true
+  credentials: true,
 }));
 
+// Enable preflight requests
 app.options('*', cors());
+
 
 
 app.use(express.json({ limit: '20mb' }));
