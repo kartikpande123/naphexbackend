@@ -83,7 +83,7 @@ app.get("/", (req,res)=>{
 })
 
 
-app.post('/login', async (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { phoneNo, password } = req.body;
 
     if (!phoneNo || !password) {
@@ -193,7 +193,7 @@ app.post('/login', async (req, res) => {
     }
 });
 // Utility function to test password verification
-app.post('/test-password', async (req, res) => {
+app.post('/api/test-password', async (req, res) => {
     const { phoneNo, password } = req.body;
 
     try {
@@ -253,7 +253,7 @@ app.post('/test-password', async (req, res) => {
 /**
 * API to verify if phone number exists before registration
 */
-app.post('/check-phone', async (req, res) => {
+app.post('/api/check-phone', async (req, res) => {
     const { phoneNo } = req.body;
 
     // Validate input
@@ -302,7 +302,7 @@ app.post('/check-phone', async (req, res) => {
 /**
 * API to get user profile by phone number (protected route)
 */
-app.get('/user-profile/:phoneNo', (req, res) => {
+app.get('/api/user-profile/:phoneNo', (req, res) => {
     try {
         const { phoneNo } = req.params;
         console.log(`\nFetching user data for phone number: ${phoneNo}`);
@@ -405,7 +405,7 @@ app.get('/user-profile/:phoneNo', (req, res) => {
 
 
 //  API to verify OTP and complete registration/login/
-app.post('/verify-otp', async (req, res) => {
+app.post('/api/verify-otp', async (req, res) => {
     const { phoneNo, otp, storedOtp } = req.body; // storedOtp from your debug response
 
     if (!phoneNo || !otp || !storedOtp) {
@@ -460,7 +460,7 @@ app.post('/verify-otp', async (req, res) => {
 /**
  * API to send OTP
  */
-app.post('/send-otp', async (req, res) => {
+app.post('/api/send-otp', async (req, res) => {
     const { phoneNo } = req.body;
 
     // Validate the phone number
@@ -540,7 +540,7 @@ app.post('/send-otp', async (req, res) => {
  * API to add user and their subcollection to Firebase.
  */
 
-app.post('/add-user', async (req, res) => {
+app.post('/api/add-user', async (req, res) => {
     const { name, phoneNo, email, password, referralId, myuserid, myrefrelid, city, state } = req.body;
 
     // Validate required fields
@@ -645,7 +645,7 @@ app.post('/add-user', async (req, res) => {
 
 
 // Optional: Add a health check endpoint
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'OK' });
 });
 
@@ -659,7 +659,7 @@ app.use((err, req, res, next) => {
 });
 
 
-app.post('/reset-password', async (req, res) => {
+app.post('/api/reset-password', async (req, res) => {
     const { phoneNo, newPassword } = req.body;
 
     // Validate request body
@@ -737,7 +737,7 @@ app.post('/reset-password', async (req, res) => {
 
 //Game1 Apis open=close
 //API to search and deduct tokens
-app.post("/deduct-tokens", async (req, res) => {
+app.post("/api/deduct-tokens", async (req, res) => {
     try {
         const { phoneNo, amount } = req.body;
 
@@ -819,7 +819,7 @@ app.post("/deduct-tokens", async (req, res) => {
 
 
 //Bet details bet section 
-app.post('/store-game-action', async (req, res) => {
+app.post('/api/store-game-action', async (req, res) => {
     try {
         // Get the necessary data from the request body
         const { phoneNo, sessionNumber, gameMode, betAmount, selectedNumbers } = req.body;
@@ -941,7 +941,7 @@ app.post('/store-game-action', async (req, res) => {
 
 
 //Admin Dashboard user show api
-app.get('/api/users', (req, res) => {
+app.get('/api/api/users', (req, res) => {
     try {
         // Set headers for Server-Sent Events (SSE)
         res.setHeader('Content-Type', 'text/event-stream');
@@ -1053,7 +1053,7 @@ cron.schedule('58 23 * * *', async () => {
     }
 });
 
-app.post('/store-bet-numbers', async (req, res) => {
+app.post('/api/store-bet-numbers', async (req, res) => {
     try {
         await initializeCollectionIfNeeded();
 
@@ -1368,7 +1368,7 @@ function scheduleResultGeneration() {
 scheduleResultGeneration();
 
 
-app.get('/users-with-openclose', async (req, res) => {
+app.get('/api/users-with-openclose', async (req, res) => {
     // Set headers for Server-Sent Events
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1554,7 +1554,7 @@ app.get('/users-with-openclose', async (req, res) => {
 
 
 //Api for show result to user and admin
-app.get('/fetch-results', async (req, res) => {
+app.get('/api/fetch-results', async (req, res) => {
     try {
         // Set headers for Server-Sent Events
         res.setHeader('Content-Type', 'text/event-stream');
@@ -1653,7 +1653,7 @@ app.get('/fetch-results', async (req, res) => {
 
 //Winners section
 // API to match results and create winners in Firebase Realtime Database
-app.post('/match-results', async (req, res) => {
+app.post('/api/match-results', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
         const resultsRef = dbRef.ref('/Results');
@@ -1861,7 +1861,7 @@ cron.schedule('55 23 * * *', async () => {
 
 
 // API to fetch winners
-app.get('/fetch-winners', async (req, res) => {
+app.get('/api/fetch-winners', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
         const winnersRef = dbRef.ref('/Winners');
@@ -1894,7 +1894,7 @@ app.get('/fetch-winners', async (req, res) => {
 
 
 //update game status
-app.post('/update-game-status', async (req, res) => {
+app.post('/api/update-game-status', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
         const usersRef = dbRef.ref('/Users');
@@ -2014,7 +2014,7 @@ cron.schedule('57 23 * * *', async () => {
 
 //add wins subcollection to user ds
 
-app.post('/add-winner-to-wins', async (req, res) => {
+app.post('/api/add-winner-to-wins', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
         const winnersRef = dbRef.ref('/Winners');
@@ -2117,7 +2117,7 @@ cron.schedule('57 23 * * *', async () => {
 
 
 //Open Close Game Admin Profit
-app.get('/updateGameDetails', async (req, res) => {
+app.get('/api/updateGameDetails', async (req, res) => {
     // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -2241,7 +2241,7 @@ cron.schedule('58 23 * * *', async () => {
 
 
 //for main component
-app.get('/getOpenCloseProfitLoss', (req, res) => {
+app.get('/api/getOpenCloseProfitLoss', (req, res) => {
     // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -2317,7 +2317,7 @@ app.get('/getOpenCloseProfitLoss', (req, res) => {
 
 
 // for chart
-app.get('/gameDetailsStream', (req, res) => {
+app.get('/api/gameDetailsStream', (req, res) => {
     // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -2372,7 +2372,7 @@ app.get('/gameDetailsStream', (req, res) => {
 // send winner winner notification
 
 
-app.get('/get-winners', async (req, res) => {
+app.get('/api/get-winners', async (req, res) => {
     try {
         const db = admin.database();
         const winnersRef = db.ref('Winners');
@@ -2393,7 +2393,7 @@ app.get('/get-winners', async (req, res) => {
     }
 });
 
-app.post('/mark-winner-claimed/:phoneNo', async (req, res) => {
+app.post('/api/mark-winner-claimed/:phoneNo', async (req, res) => {
     try {
         const { phoneNo } = req.params;
         const db = admin.database();
@@ -2437,7 +2437,7 @@ app.post('/mark-winner-claimed/:phoneNo', async (req, res) => {
 });
 
 //Game 2 action demo
-app.post('/store-game2-action', async (req, res) => {
+app.post('/api/store-game2-action', async (req, res) => {
     try {
         // Get the necessary data from the request body
         const { phoneNo, betAmount } = req.body;
@@ -2562,7 +2562,7 @@ async function compressImage(buffer, maxSizeBytes = 1024 * 1024) {
 }
 
 // Help request route
-app.post('/help-request',
+app.post('/api/help-request',
     cors(),
     upload.single('photo'),
     async (req, res) => {
@@ -2623,7 +2623,7 @@ app.post('/help-request',
     }
 );
 
-app.get('/help-requests', async (req, res) => {
+app.get('/api/help-requests', async (req, res) => {
     try {
         const { status, sortBy, order, limit } = req.query;
 
@@ -2683,7 +2683,7 @@ app.get('/help-requests', async (req, res) => {
 });
 
 
-app.patch('/help-requests/:id', async (req, res) => {
+app.patch('/api/help-requests/:id', async (req, res) => {
     try {
       const { id } = req.params;
       const { status } = req.body;
@@ -2749,7 +2749,7 @@ app.patch('/help-requests/:id', async (req, res) => {
 //   Binary System Functionality and apis
 /////////////////////////////////////////
 // Binary System Registration API
-app.post("/registerUser", async (req, res) => {
+app.post("/api/registerUser", async (req, res) => {
     try {
         const { userId, name, referralId, myrefrelid } = req.body;
         if (!userId || !name || !myrefrelid) {
@@ -2825,7 +2825,7 @@ app.post("/registerUser", async (req, res) => {
 });
 
 //Binary refrelid exist check api (signup)
-app.get("/checkReferralSlots/:referralId", async (req, res) => {
+app.get("/api/checkReferralSlots/:referralId", async (req, res) => {
     try {
         const { referralId } = req.params;
 
@@ -2901,7 +2901,7 @@ app.get("/checkReferralSlots/:referralId", async (req, res) => {
 });
 
 // API to update daily played amount
-app.post("/updatePlayedAmount", async (req, res) => {
+app.post("/api/updatePlayedAmount", async (req, res) => {
     try {
         const { userId, amount } = req.body;
         if (!userId || !amount || amount <= 0) {
@@ -2947,7 +2947,7 @@ const finalizeDailyAmounts = async () => {
     }
 };
 
-schedule.scheduleJob("08 12 * * *", finalizeDailyAmounts); //11:55
+schedule.scheduleJob("46 11 * * *", finalizeDailyAmounts); //11:55
 
 
 // Function to calculate total business for a user left and right update daily
@@ -3002,7 +3002,7 @@ const updateBusinessForAllUsers = async () => {
 };
 
 // Schedule the update to run at 11:55 PM daily
-schedule.scheduleJob("08 12 * * *", updateBusinessForAllUsers); //11:55
+schedule.scheduleJob("46 11 * * *", updateBusinessForAllUsers); //11:55
 
 // Bonus Step Levels
 const BONUS_STEPS = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
@@ -3170,12 +3170,12 @@ const calculateBonuses = async () => {
 };
 
 // Schedule the bonus calculation to run at 23:56 daily
-schedule.scheduleJob("09 12 * * *", calculateBonuses);
+schedule.scheduleJob("47 11 * * *", calculateBonuses);
 
 
 
 //API to get total business and eligible remaining business(For User)
-app.get("/user-business", async (req, res) => {
+app.get("/api/user-business", async (req, res) => {
     try {
         const { userId } = req.query;
         if (!userId) {
@@ -3351,7 +3351,7 @@ const buildHierarchicalTree = (flatTree, rootId) => {
 };
 
 // Admin API to fetch full binary tree with business details
-app.get("/admin-binary-tree", async (req, res) => {
+app.get("/api/admin-binary-tree", async (req, res) => {
     try {
         const flatTree = await getBinaryTree();
         await getBusinessDetails(flatTree);
@@ -3495,7 +3495,7 @@ const getUserDownline = async (userId) => {
 };
 
 // API to fetch user's binary tree with latest available data
-app.get("/user-downline", async (req, res) => {
+app.get("/api/user-downline", async (req, res) => {
     try {
         const { userId } = req.query;
         
@@ -3532,7 +3532,7 @@ app.get("/user-downline", async (req, res) => {
 
 
 //Frinds earning api
-app.get('/latest', async (req, res) => {
+app.get('/api/latest', async (req, res) => {
     try {
       const { userId } = req.query;
       
@@ -3619,7 +3619,7 @@ app.get('/latest', async (req, res) => {
 
   
 //Api for user daily bonus show in frinds earning
-app.get('/userDailyEarnings', async (req, res) => {
+app.get('/api/userDailyEarnings', async (req, res) => {
     try {
       const { userId } = req.query;
       
@@ -3675,7 +3675,7 @@ app.get('/userDailyEarnings', async (req, res) => {
   });
 
 
-app.get("/admin-binary-tree-by-date-range", async (req, res) => {
+app.get("/api/admin-binary-tree-by-date-range", async (req, res) => {
     try {
         // Get the base tree structure
         const flatTree = await getBinaryTree();
