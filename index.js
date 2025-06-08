@@ -1343,7 +1343,7 @@ async function generateAndStoreResults(sessionNumber, type) {
 function scheduleResultGeneration() {
     const scheduleTimes = [
         { time: "14:30", session: "session-1", type: "open" },
-        { time: "17:30", session: "session-1", type: "close" },
+        { time: "17:36", session: "session-1", type: "close" },
         { time: "21:30", session: "session-2", type: "open" },
         { time: "23:50", session: "session-2", type: "close" }
     ];
@@ -3759,6 +3759,9 @@ app.get("/api/admin-binary-tree-by-date-range", async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 });
+
+
+console.log("Current server time:", new Date().toLocaleString());
 
 
 
