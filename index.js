@@ -1343,7 +1343,7 @@ async function generateAndStoreResults(sessionNumber, type) {
 function scheduleResultGeneration() {
     const scheduleTimes = [
         { time: "14:30", session: "session-1", type: "open" },
-        { time: "17:36", session: "session-1", type: "close" },
+        { time: "17:30", session: "session-1", type: "close" },
         { time: "21:30", session: "session-2", type: "open" },
         { time: "23:50", session: "session-2", type: "close" }
     ];
@@ -2947,7 +2947,7 @@ const finalizeDailyAmounts = async () => {
     }
 };
 
-schedule.scheduleJob("46 11 * * *", finalizeDailyAmounts); //11:55
+schedule.scheduleJob("55 23 * * *", finalizeDailyAmounts); //11:55
 
 
 // Function to calculate total business for a user left and right update daily
@@ -3002,7 +3002,7 @@ const updateBusinessForAllUsers = async () => {
 };
 
 // Schedule the update to run at 11:55 PM daily
-schedule.scheduleJob("46 11 * * *", updateBusinessForAllUsers); //11:55
+schedule.scheduleJob("55 23 * * *", updateBusinessForAllUsers); //11:55
 
 // Bonus Step Levels
 const BONUS_STEPS = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
@@ -3170,7 +3170,7 @@ const calculateBonuses = async () => {
 };
 
 // Schedule the bonus calculation to run at 23:56 daily
-schedule.scheduleJob("47 11 * * *", calculateBonuses);
+schedule.scheduleJob("56 23 * * *", calculateBonuses);
 
 
 
