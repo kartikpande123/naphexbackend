@@ -939,7 +939,6 @@ app.post('/api/store-game-action', async (req, res) => {
 
 
 
-
 //Admin Dashboard user show api
 app.get('/api/api/users', (req, res) => {
     try {
@@ -1845,7 +1844,7 @@ cron.schedule('55 23 * * *', async () => {
 
         console.log('Starting the match-results API call at 11:55 PM');
 
-        const response = await axios.post(`${API_BASE_URL}/match-results`);
+        const response = await axios.post(`${API_BASE_URL}/api/match-results`);
 
         console.log('Match-results API called successfully:', response.data);
     } catch (error) {
@@ -1978,7 +1977,7 @@ cron.schedule('57 23 * * *', async () => {
 
         console.log('Running /update-game-status cron job at 11:57 PM');
 
-        const response = await axios.post(`${API_BASE_URL}/update-game-status`);
+        const response = await axios.post(`${API_BASE_URL}/api/update-game-status`);
 
         console.log('Game status update result:', response.data);
     } catch (error) {
@@ -1996,7 +1995,7 @@ cron.schedule('57 23 * * *', async () => {
 
         console.log('Running /update-game-status cron job at 11:57 PM');
 
-        const response = await axios.post(`${API_BASE_URL}/update-game-status`);
+        const response = await axios.post(`${API_BASE_URL}/api/update-game-status`);
 
         console.log('Game status update result:', response.data);
     } catch (error) {
@@ -2100,7 +2099,7 @@ cron.schedule('57 23 * * *', async () => {
 
         console.log('Running /add-winner-to-wins cron job at 11:57 PM');
 
-        const response = await axios.post(`${API_BASE_URL}/add-winner-to-wins`);
+        const response = await axios.post(`${API_BASE_URL}/api/add-winner-to-wins`);
 
         console.log('Winners to wins subcollection update result:', response.data);
     } catch (error) {
@@ -2224,7 +2223,7 @@ cron.schedule('58 23 * * *', async () => {
 
         console.log('Running cron job to update game details at 11:58 PM');
 
-        const response = await axios.get(`${API_BASE_URL}/updateGameDetails`);
+        const response = await axios.get(`${API_BASE_URL}/api/updateGameDetails`);
 
         console.log('Game details updated successfully via cron job:', response.data);
     } catch (error) {
@@ -3759,12 +3758,6 @@ app.get("/api/admin-binary-tree-by-date-range", async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 });
-
-
-console.log("Current server time:", new Date().toLocaleString());
-
-
-
 
 
 //Server
