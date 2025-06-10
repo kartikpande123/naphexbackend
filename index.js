@@ -1342,8 +1342,8 @@ async function generateAndStoreResults(sessionNumber, type) {
 
 function scheduleResultGeneration() {
     const scheduleTimes = [
-        { time: "12:17", session: "session-1", type: "open" },
-        { time: "12:18", session: "session-1", type: "close" },
+        { time: "14:30", session: "session-1", type: "open" },
+        { time: "17:30", session: "session-1", type: "close" },
         { time: "21:30", session: "session-2", type: "open" },
         { time: "23:50", session: "session-2", type: "close" }
     ];
