@@ -1298,8 +1298,8 @@ async function generateAndStoreResults(sessionNumber, type) {
         if (type === "open") {
             const openResults = await generator.processOpenResults(firebaseBets, multipliers);
             resultsToStore[formattedSessionNumber] = {
-                "open-number": openResults.openNumber,
-                "open-pana": openResults.openPanna,
+                "open-number": String(openResults.openNumber),
+                "open-pana": String(openResults.openPanna),
                 "nums": `${openResults.openPanna} ${openResults.openNumber}`,
                 "details": {
                     openNumberPayout: openResults.details.openNumberPayout,
@@ -1319,8 +1319,8 @@ async function generateAndStoreResults(sessionNumber, type) {
 
             resultsToStore[formattedSessionNumber] = {
                 ...existingResults,
-                "close-number": closeResults.closeNumber,
-                "close-pana": closeResults.closePanna,
+                "close-number": String(closeResults.closeNumber),
+                "close-pana": String(closeResults.closePanna),
                 "nums": `${existingResults["open-pana"]} ${existingResults["open-number"]} ${closeResults.closeNumber} ${closeResults.closePanna}`,
                 "details": {
                     ...existingResults.details,
@@ -1339,10 +1339,11 @@ async function generateAndStoreResults(sessionNumber, type) {
     }
 }
 
+
 function scheduleResultGeneration() {
     const scheduleTimes = [
-        { time: "14:30", session: "session-1", type: "open" },
-        { time: "17:30", session: "session-1", type: "close" },
+        { time: "12:17", session: "session-1", type: "open" },
+        { time: "12:18", session: "session-1", type: "close" },
         { time: "21:30", session: "session-2", type: "open" },
         { time: "23:50", session: "session-2", type: "close" }
     ];
