@@ -1661,11 +1661,10 @@ app.post('/api/match-results', async (req, res) => {
         const winnersRef = dbRef.ref('/Winners');
         const processedDatesRef = dbRef.ref('/ProcessedDates');
 
-        // Get the current date based on server time
         const now = moment().tz('Asia/Kolkata');
         const today = now.format('YYYY-MM-DD');
 
-        // 1️⃣ Check if today's results have already been processed
+        // ✅ Check if today's results were already processed
         const alreadyProcessedSnapshot = await processedDatesRef.child(today).once('value');
         if (alreadyProcessedSnapshot.exists()) {
             return res.status(400).json({
@@ -1674,7 +1673,7 @@ app.post('/api/match-results', async (req, res) => {
             });
         }
 
-        // 2️⃣ Fetch today's results
+        // ✅ Get today's results
         const resultsSnapshot = await resultsRef.child(today).once('value');
         const todayResults = resultsSnapshot.val();
 
@@ -1685,7 +1684,7 @@ app.post('/api/match-results', async (req, res) => {
             });
         }
 
-        // 3️⃣ Fetch all users
+        // ✅ Get all users
         const usersSnapshot = await usersRef.once('value');
         const usersData = usersSnapshot.val();
 
@@ -1698,11 +1697,10 @@ app.post('/api/match-results', async (req, res) => {
 
         const allWinners = {};
 
-        // 4️⃣ Process each session of today's results
+        // 🔁 Loop through each session result
         for (const [session, sessionResults] of Object.entries(todayResults)) {
             const sessionWinners = [];
 
-            // 5️⃣ Process each user's game actions for today's session
             for (const [userId, userData] of Object.entries(usersData)) {
                 const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
                 const gamesSnapshot = await userGamesRef.once('value');
@@ -1710,19 +1708,26 @@ app.post('/api/match-results', async (req, res) => {
 
                 if (!gamesData) continue;
 
-                // Check each game action for winning conditions
                 for (const [gameId, gameData] of Object.entries(gamesData)) {
-                    // Ensure the bet was placed today (server-generated timestamp)
+                    // ✅ Skip if already processed
+                    if (gameData.processed) continue;
+
+                    // ✅ Ensure bet is from today
                     const betTimestamp = gameData.timestamp
                         ? moment(gameData.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
                         : null;
 
-                    if (betTimestamp !== today) {
-                        // Skip bets that are not from today
-                        continue;
-                    }
+                    if (betTimestamp !== today) continue;
 
-                    // 6️⃣ Check for winning condition
+                    // ✅ Skip if this gameId already has a winner entry
+                    const existingWinnerSnap = await winnersRef
+                        .orderByChild('gameId')
+                        .equalTo(gameId)
+                        .once('value');
+                    
+                    if (existingWinnerSnap.exists()) continue;
+
+                    // ✅ Check win condition
                     const winnerEntry = checkWinCondition(
                         session,
                         sessionResults,
@@ -1734,15 +1739,18 @@ app.post('/api/match-results', async (req, res) => {
                     );
 
                     if (winnerEntry) {
-                        // Save winner to the /Winners collection
+                        // Save winner
                         const newWinnerRef = winnersRef.push();
                         await newWinnerRef.set(winnerEntry);
 
-                        // Update user's tokens using an atomic transaction
+                        // Update tokens
                         const userTokensRef = usersRef.child(`${userId}/tokens`);
                         await userTokensRef.transaction((currentTokens) => {
                             return (currentTokens || 0) + winnerEntry.amountWon;
                         });
+
+                        // ✅ Mark game as processed
+                        await userGamesRef.child(`${gameId}/processed`).set(true);
 
                         sessionWinners.push(winnerEntry);
                     }
@@ -1752,10 +1760,9 @@ app.post('/api/match-results', async (req, res) => {
             allWinners[session] = sessionWinners;
         }
 
-        // 7️⃣ Mark today's date as processed to prevent duplicate processing
+        // ✅ Mark date as processed
         await processedDatesRef.child(today).set(true);
 
-        // 8️⃣ Return success response
         res.status(200).json({
             success: true,
             message: 'Results matched and winners calculated',
@@ -1776,54 +1783,47 @@ app.post('/api/match-results', async (req, res) => {
     }
 });
 
-// Helper Function: Check Winning Conditions
+// Helper Function: Check Winning Conditions (unchanged)
 function checkWinCondition(session, sessionResults, gameData, userId, userData, gameId, today) {
-    const gameMode = gameData.gameMode; // open-number, close-number, open-pana, open-close, etc.
+    const gameMode = gameData.gameMode;
     const betAmount = gameData.betAmount;
     const selectedNumbers = gameData.selectedNumbers;
 
     let amountWon = 0;
 
     if (gameMode === "open-number" && session === "session1") {
-        // Match open-number for session1
         if (selectedNumbers.includes(parseInt(sessionResults["open-number"]))) {
-            amountWon = betAmount * 10; // Example multiplier
+            amountWon = betAmount * 10;
             return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openNumber", today, session);
         }
     } else if (gameMode === "close-number" && session === "session2") {
-        // Match close-number for session2
         if (selectedNumbers.includes(parseInt(sessionResults["close-number"]))) {
-            amountWon = betAmount * 10; // Example multiplier
+            amountWon = betAmount * 10;
             return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "closeNumber", today, session);
         }
     } else if (gameMode === "open-pana" && session === "session1") {
-        // Match open-pana for session1
         if (selectedNumbers.join("") === sessionResults["open-pana"]) {
-            amountWon = betAmount * 100; // Example multiplier
+            amountWon = betAmount * 100;
             return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openPana", today, session);
         }
     } else if (gameMode === "close-pana" && session === "session2") {
-        // Match close-pana for session2
         if (selectedNumbers.join("") === sessionResults["close-pana"]) {
-            amountWon = betAmount * 100; // Example multiplier
+            amountWon = betAmount * 100;
             return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "closePana", today, session);
         }
     } else if (gameMode === "open-close") {
-        // Open-close match for the current session
         const openCloseResult = `${sessionResults["open-number"]}${sessionResults["close-number"]}`;
-        const userSelection = selectedNumbers.join(""); // Concatenate selected numbers
-
+        const userSelection = selectedNumbers.join("");
         if (userSelection === openCloseResult) {
-            amountWon = betAmount * 100; // Example multiplier
+            amountWon = betAmount * 100;
             return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openClose", today, session);
         }
     }
 
-    return null; // No match, no winner
+    return null;
 }
 
-
-// Helper Function: Create Winner Entry
+// Helper: Create Winner Entry
 function createWinnerEntry(userId, phoneNo, gameId, betAmount, amountWon, winType, date, session) {
     return {
         userId,
@@ -1836,8 +1836,6 @@ function createWinnerEntry(userId, phoneNo, gameId, betAmount, amountWon, winTyp
         session,
     };
 }
-
-
 
 cron.schedule('55 23 * * *', async () => {
     try {
@@ -1857,43 +1855,7 @@ cron.schedule('55 23 * * *', async () => {
 }, {
     timezone: 'Asia/Kolkata'
 });
-
-
-
-// API to fetch winners
-app.get('/api/fetch-winners', async (req, res) => {
-    try {
-        const dbRef = firebaseAdmin.database();
-        const winnersRef = dbRef.ref('/Winners');
-
-        // Fetch all winners data
-        const winnersSnapshot = await winnersRef.once('value');
-        const winnersData = winnersSnapshot.val() || {};
-
-        // Convert winners to array
-        const winnersList = Object.entries(winnersData).map(([key, winner]) => ({
-            id: key,
-            ...winner
-        }));
-
-        res.status(200).json({
-            success: true,
-            message: 'All winners fetched successfully',
-            winners: winnersList,
-            count: winnersList.length
-        });
-    } catch (error) {
-        console.error('Error fetching winners:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch winners',
-            error: error.message
-        });
-    }
-});
-
-
-//update game status
+//update game status token updated
 app.post('/api/update-game-status', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
@@ -2009,11 +1971,7 @@ cron.schedule('57 23 * * *', async () => {
     timezone: 'Asia/Kolkata'
 });
 
-
-
-
 //add wins subcollection to user ds
-
 app.post('/api/add-winner-to-wins', async (req, res) => {
     try {
         const dbRef = firebaseAdmin.database();
@@ -2093,7 +2051,6 @@ app.post('/api/add-winner-to-wins', async (req, res) => {
     }
 });
 
-
 cron.schedule('57 23 * * *', async () => {
     try {
         const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
@@ -2114,6 +2071,39 @@ cron.schedule('57 23 * * *', async () => {
     timezone: "Asia/Kolkata"
 });
 
+
+
+// API to fetch winners
+app.get('/api/fetch-winners', async (req, res) => {
+    try {
+        const dbRef = firebaseAdmin.database();
+        const winnersRef = dbRef.ref('/Winners');
+
+        // Fetch all winners data
+        const winnersSnapshot = await winnersRef.once('value');
+        const winnersData = winnersSnapshot.val() || {};
+
+        // Convert winners to array
+        const winnersList = Object.entries(winnersData).map(([key, winner]) => ({
+            id: key,
+            ...winner
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: 'All winners fetched successfully',
+            winners: winnersList,
+            count: winnersList.length
+        });
+    } catch (error) {
+        console.error('Error fetching winners:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch winners',
+            error: error.message
+        });
+    }
+});
 
 
 //Open Close Game Admin Profit
@@ -2217,7 +2207,6 @@ app.get('/api/updateGameDetails', async (req, res) => {
     });
 });
 
-
 cron.schedule('58 23 * * *', async () => {
     try {
         const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
@@ -2236,9 +2225,6 @@ cron.schedule('58 23 * * *', async () => {
 }, {
     timezone: 'Asia/Kolkata'
 });
-
-
-
 
 //for main component
 app.get('/api/getOpenCloseProfitLoss', (req, res) => {
@@ -2370,22 +2356,20 @@ app.get('/api/gameDetailsStream', (req, res) => {
 
 
 // send winner winner notification
-
-
 app.get('/api/get-winners', async (req, res) => {
     try {
         const db = admin.database();
         const winnersRef = db.ref('Winners');
-
+        
         const snapshot = await winnersRef.once('value');
         const winners = snapshot.val();
-
-        // Convert to array and filter out already shown winners
+        
+        // Convert to array and include all winner data with IDs
         const winnersList = Object.keys(winners || {}).map(key => ({
             id: key,
             ...winners[key]
         }));
-
+        
         res.json(winnersList);
     } catch (error) {
         console.error('Error fetching winners:', error);
@@ -2393,46 +2377,65 @@ app.get('/api/get-winners', async (req, res) => {
     }
 });
 
-app.post('/api/mark-winner-claimed/:phoneNo', async (req, res) => {
+app.post('/api/mark-winner-claimed/:winnerId', async (req, res) => {
     try {
-        const { phoneNo } = req.params;
+        const { winnerId } = req.params;
         const db = admin.database();
         const winnersRef = db.ref('Winners');
-
-        // Find and update the specific winner
-        const snapshot = await winnersRef.once('value');
-        const winners = snapshot.val();
-
-        let updateKey = null;
-        for (let key in winners) {
-            if (winners[key].phoneNo === phoneNo && !winners[key].popupShown) {
-                updateKey = key;
-                break;
-            }
-        }
-
-        if (updateKey) {
-            // Update the specific winner's popupShown flag
-            await winnersRef.child(updateKey).update({
-                popupShown: true
-            });
-
-            res.json({
-                success: true,
-                message: "Winner popup marked as shown"
-            });
-        } else {
-            res.status(404).json({
+        
+        // Check if the winner exists
+        const winnerSnapshot = await winnersRef.child(winnerId).once('value');
+        
+        if (!winnerSnapshot.exists()) {
+            return res.status(404).json({
                 success: false,
-                message: "No matching winner found"
+                message: "Winner not found"
             });
         }
+        
+        // Update the specific winner's popupShown flag
+        await winnersRef.child(winnerId).update({
+            popupShown: true,
+            claimedAt: admin.database.ServerValue.TIMESTAMP
+        });
+        
+        res.json({
+            success: true,
+            message: "Winner popup marked as shown"
+        });
+        
     } catch (error) {
         console.error('Error marking winner as claimed:', error);
         res.status(500).json({
             error: true,
             message: 'Internal server error'
         });
+    }
+});
+
+
+
+app.get('/api/get-user-winners/:phoneNo', async (req, res) => {
+    try {
+        const { phoneNo } = req.params;
+        const db = admin.database();
+        const winnersRef = db.ref('Winners');
+        
+        const snapshot = await winnersRef.orderByChild('phoneNo').equalTo(phoneNo).once('value');
+        const winners = snapshot.val();
+        
+        // Convert to array and filter unshown winners
+        const winnersList = Object.keys(winners || {})
+            .map(key => ({
+                id: key,
+                ...winners[key]
+            }))
+            .filter(winner => !winner.popupShown);
+        
+        res.json(winnersList);
+    } catch (error) {
+        console.error('Error fetching user winners:', error);
+        res.status(500).json({ error: true, message: 'Internal server error' });
     }
 });
 
