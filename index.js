@@ -11,6 +11,8 @@ const schedule = require('node-schedule');
 const multer = require('multer');
 const sharp = require("sharp")
 const app = express();
+const status = require("express-status-monitor");
+const path = require("path")
 
 
 const allowedOrigins = [
@@ -43,6 +45,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+app.use(status())
 
 
 
@@ -67,6 +70,8 @@ const port = 3200;
 //firestore
 const firestore = admin.firestore();
 const db = admin.database();
+const bucket = admin.storage().bucket();
+
 
 // Edumarc SMS API Configuration
 const EDUMARC_API_URL = 'https://smsapi.edumarcsms.com/api/v1/sendsms';
@@ -82,116 +87,135 @@ app.get("/", (req,res)=>{
     res.send("Naphex Game Bakcend Is Running!")
 })
 
-
+//login api check kyc too
 app.post('/api/login', async (req, res) => {
-    const { phoneNo, password } = req.body;
+  const { phoneNo, password } = req.body;
 
-    if (!phoneNo || !password) {
-        return res.status(400).json({
-            success: false,
-            message: 'Phone number and password are required.'
-        });
+  if (!phoneNo || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Phone number and password are required.'
+    });
+  }
+
+  try {
+    const formattedPhoneNo = phoneNo.startsWith('+91') ? phoneNo : `+91${phoneNo}`;
+    const db = firebaseAdmin.database(); // ✅ using `db` variable as standard
+    const usersRef = db.ref('/Users');
+
+    const snapshot = await usersRef.once('value');
+    const usersData = snapshot.val();
+
+    if (!usersData) {
+      return res.status(401).json({
+        success: false,
+        message: 'No users found in database.'
+      });
     }
 
-    try {
-        // Format phone number for Auth
-        const formattedPhoneNo = phoneNo.startsWith('+91') ? phoneNo : `+91${phoneNo}`;
+    let userData = null;
+    let userKey = null;
 
-        // Get reference to Users node
-        const dbRef = firebaseAdmin.database();
-        const usersRef = dbRef.ref('/Users');
+    Object.keys(usersData).forEach(key => {
+      const currentUser = usersData[key];
+      if (currentUser && currentUser.phoneNo === phoneNo) {
+        userData = currentUser;
+        userKey = key;
+      }
+    });
 
-        // Fetch users data
-        const snapshot = await usersRef.once('value');
-        const usersData = snapshot.val();
-
-        if (!usersData) {
-            return res.status(401).json({
-                success: false,
-                message: 'No users found in database.'
-            });
-        }
-
-        // Find user by phone number
-        let userData = null;
-        let userKey = null;
-
-        Object.keys(usersData).forEach(key => {
-            const currentUser = usersData[key];
-            if (currentUser && currentUser.phoneNo === phoneNo) {
-                userData = currentUser;
-                userKey = key;
-            }
-        });
-
-        if (!userData) {
-            return res.status(401).json({
-                success: false,
-                message: 'User not found in database.'
-            });
-        }
-
-        // Compare passwords
-        const isValidPassword = await bcrypt.compare(password, userData.password);
-
-        if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid password.'
-            });
-        }
-
-        // Get user record from Firebase Auth
-        const userRecord = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhoneNo);
-
-        // Generate custom token
-        const customToken = await firebaseAdmin.auth().createCustomToken(userRecord.uid);
-
-        // FIXED: Properly get userIds from the database
-        const userids = {
-            myuserid: userData.userIds?.myuserid || userData.userId || '', // Check both possible paths
-            myrefrelid: userData.userIds?.myrefrelid || userData.referId || '' // Check both possible paths
-        };
-
-        // If userIds are empty and should have values, update them in the database
-        if (!userids.myuserid || !userids.myrefrelid) {
-            // Generate new IDs if they don't exist
-            userids.myuserid = userids.myuserid || `USER${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-            userids.myrefrelid = userids.myrefrelid || `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-
-            // Update the database with new IDs
-            await usersRef.child(userKey).child('userIds').set(userids);
-        }
-
-        // Prepare response data with current timestamp and proper userIds
-        const responseData = {
-            success: true,
-            message: 'Login successful',
-            customToken,
-            userData: {
-                name: userData.name,
-                phoneNo: userData.phoneNo,
-                email: userData.email,
-                tokens: userData.tokens,
-                city: userData.city,
-                state: userData.state,
-                createdAt: userData.createdAt,
-                loginTimestamp: new Date().toISOString(),
-                userids: userids  // Now properly populated
-            }
-        };
-
-        return res.status(200).json(responseData);
-
-    } catch (error) {
-        console.error('Login error:', error);
-        return res.status(401).json({
-            success: false,
-            message: 'Invalid credentials or user not found.',
-            debug: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+    if (!userData) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found in database.'
+      });
     }
+
+    // ✅ Check if user is blocked
+    if (userData.status === 'blocked' || userData.blocked === true) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is blocked. Please contact support.'
+      });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, userData.password);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid password.'
+      });
+    }
+
+    // --- ✅ KYC CHECK ---
+    const isRootUser = userData.id === 'RootId';
+    const kycStatus = userData?.kycStatus;
+
+    if (!isRootUser) {
+      if (!kycStatus) {
+        return res.status(403).send('KYC status missing. Please complete your KYC to login.');
+      }
+
+      if (kycStatus === 'submitted') {
+        return res.status(403).send('Your KYC verification is in process. Please wait or contact support.');
+      }
+
+      if (kycStatus !== 'accepted') {
+        return res.status(403).send('KYC not accepted. Please contact support.');
+      }
+    }
+
+    // ✅ Firebase Auth
+    const userRecord = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhoneNo);
+    const customToken = await firebaseAdmin.auth().createCustomToken(userRecord.uid);
+
+    // ✅ Generate or reuse userIds
+    const userids = {
+      myuserid: userData.userIds?.myuserid || userData.userId || '',
+      myrefrelid: userData.userIds?.myrefrelid || userData.referId || ''
+    };
+
+    if (!userids.myuserid || !userids.myrefrelid) {
+      userids.myuserid = userids.myuserid || `USER${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+      userids.myrefrelid = userids.myrefrelid || `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+      await usersRef.child(userKey).child('userIds').set(userids);
+    }
+
+    // ✅ Response
+    const responseData = {
+      success: true,
+      message: 'Login successful',
+      customToken,
+      userData: {
+        name: userData.name,
+        phoneNo: userData.phoneNo,
+        email: userData.email || '',
+        tokens: userData.tokens,
+        city: userData.city,
+        state: userData.state,
+        createdAt: userData.createdAt,
+        loginTimestamp: new Date().toISOString(),
+        userids: userids
+      }
+    };
+
+    return res.status(200).json(responseData);
+
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid credentials or user not found.',
+      debug: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
+
+
+
+
+
+
 // Utility function to test password verification
 app.post('/api/test-password', async (req, res) => {
     const { phoneNo, password } = req.body;
@@ -2752,17 +2776,76 @@ app.patch('/api/help-requests/:id', async (req, res) => {
 //   Binary System Functionality and apis
 /////////////////////////////////////////
 // Binary System Registration API
-app.post("/api/registerUser", async (req, res) => {
+const uploadFileToStorage = async (file, fileName, folderPath) => {
     try {
-        const { userId, name, referralId, myrefrelid } = req.body;
-        if (!userId || !name || !myrefrelid) {
-            return res.status(400).json({ error: "Missing required fields" });
-        }
+        const fileUpload = bucket.file(`${folderPath}/${fileName}`);
+        
+        const blobStream = fileUpload.createWriteStream({
+            metadata: {
+                contentType: file.mimetype,
+                metadata: {
+                    firebaseStorageDownloadTokens: require('uuid').v4(),
+                }
+            }
+        });
 
+        return new Promise((resolve, reject) => {
+            blobStream.on('error', (error) => {
+                console.error('Upload error:', error);
+                reject(error);
+            });
+
+            blobStream.on('finish', async () => {
+                try {
+                    // Make the file publicly accessible
+                    await fileUpload.makePublic();
+                    
+                    // Get the public URL
+                    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${folderPath}/${fileName}`;
+                    resolve(publicUrl);
+                } catch (error) {
+                    console.error('Error making file public:', error);
+                    reject(error);
+                }
+            });
+
+            blobStream.end(file.buffer);
+        });
+    } catch (error) {
+        console.error('Storage upload error:', error);
+        throw error;
+    }
+};
+
+app.post("/api/registerUser", upload.fields([
+    { name: 'aadharCard', maxCount: 1 },
+    { name: 'panCard', maxCount: 1 },
+    { name: 'bankPassbook', maxCount: 1 }
+]), async (req, res) => {
+    const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state } = req.body;
+
+    // Validate required fields for both binary and regular user creation
+    if (!userId || !name || !myrefrelid || !phoneNo || !password || !city || !state) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields: userId, name, myrefrelid, phoneNo, password, city, state"
+        });
+    }
+
+    // Validate KYC files
+    if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.bankPassbook) {
+        return res.status(400).json({
+            success: false,
+            error: 'All KYC documents are required: aadharCard, panCard, bankPassbook.'
+        });
+    }
+
+    try {
+        // ============ BINARY USER REGISTRATION LOGIC ============
         const binaryUsersRef = db.ref("binaryUsers");
         const usersSnapshot = await binaryUsersRef.once("value");
 
-        let updates = {};
+        let binaryUpdates = {};
         let referrerUserId = null;
 
         // Check if referralId exists in myrefrelid
@@ -2774,56 +2857,235 @@ app.post("/api/registerUser", async (req, res) => {
 
         if (!usersSnapshot.exists()) {
             // No users exist, create root user
-            updates[`binaryUsers/${userId}`] = {
+            binaryUpdates[`binaryUsers/${userId}`] = {
                 name,
                 referralId: null,
                 leftChild: null,
                 rightChild: null,
-                myrefrelid, // Store myrefrelid
+                myrefrelid,
                 playedAmounts: {},
                 carryForward: {},
                 bonusReceived: {}
             };
         } else {
             if (!referrerUserId) {
-                return res.status(400).json({ error: "Invalid referral ID" });
+                return res.status(400).json({ 
+                    success: false,
+                    error: "Invalid referral ID" 
+                });
             }
 
             const referrerRef = db.ref(`binaryUsers/${referrerUserId}`);
             const referrerSnapshot = await referrerRef.once("value");
 
             if (!referrerSnapshot.exists()) {
-                return res.status(400).json({ error: "Invalid referral ID" });
+                return res.status(400).json({ 
+                    success: false,
+                    error: "Invalid referral ID" 
+                });
             }
 
             let referrerData = referrerSnapshot.val();
 
             // Check left and right placement
             if (!referrerData.leftChild) {
-                updates[`binaryUsers/${referrerUserId}/leftChild`] = userId;
+                binaryUpdates[`binaryUsers/${referrerUserId}/leftChild`] = userId;
             } else if (!referrerData.rightChild) {
-                updates[`binaryUsers/${referrerUserId}/rightChild`] = userId;
+                binaryUpdates[`binaryUsers/${referrerUserId}/rightChild`] = userId;
             } else {
-                return res.status(400).json({ error: "Both referral slots are occupied" });
+                return res.status(400).json({ 
+                    success: false,
+                    error: "Both referral slots are occupied" 
+                });
             }
 
-            // Create new user entry
-            updates[`binaryUsers/${userId}`] = {
+            // Create new binary user entry
+            binaryUpdates[`binaryUsers/${userId}`] = {
                 name,
-                referralId: referrerUserId, // Store userId of referrer
+                referralId: referrerUserId,
                 leftChild: null,
                 rightChild: null,
-                myrefrelid, // Store myrefrelid
+                myrefrelid,
                 playedAmounts: {},
                 carryForward: {},
                 bonusReceived: {}
             };
         }
 
-        await db.ref().update(updates);
-        return res.status(201).json({ message: "User registered successfully", userId, referralId: referrerUserId || null });
+        // Update binary users
+        await db.ref().update(binaryUpdates);
+
+        // ============ REGULAR USER CREATION LOGIC ============
+        
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create the user in Firebase Authentication
+        const userRecord = await firebaseAdmin.auth().createUser({
+            phoneNumber: `+91${phoneNo}`,
+            password: password,
+            displayName: name,
+            email: email || undefined,
+        });
+
+        // Get reference to Users collection
+        const dbRef = firebaseAdmin.database();
+        const usersRef = dbRef.ref('/Users');
+
+        // Find the highest existing user number
+        const snapshot = await usersRef.orderByKey().once('value');
+        let highestNumber = 0;
+        snapshot.forEach((childSnapshot) => {
+            const userKey = childSnapshot.key;
+            const match = userKey.match(/user-(\d+)/);
+            if (match) {
+                const userNumber = parseInt(match[1]);
+                highestNumber = Math.max(highestNumber, userNumber);
+            }
+        });
+
+        // Generate next user ID
+        const nextUserNumber = highestNumber + 1;
+        const userPath = `user-${nextUserNumber}`;
+
+        // Get current date and time
+        const createdAt = new Date().toISOString();
+
+        // Upload KYC images to Firebase Storage
+        const kycImages = {};
+        const folderPath = `kyc-documents/${userPath}`;
+
+        try {
+            // Upload Aadhar Card
+            if (req.files.aadharCard && req.files.aadharCard[0]) {
+                const aadharFile = req.files.aadharCard[0];
+                const aadharFileName = `aadhar_${Date.now()}_${path.extname(aadharFile.originalname)}`;
+                kycImages.aadharCardUrl = await uploadFileToStorage(aadharFile, aadharFileName, folderPath);
+            }
+
+            // Upload PAN Card
+            if (req.files.panCard && req.files.panCard[0]) {
+                const panFile = req.files.panCard[0];
+                const panFileName = `pan_${Date.now()}_${path.extname(panFile.originalname)}`;
+                kycImages.panCardUrl = await uploadFileToStorage(panFile, panFileName, folderPath);
+            }
+
+            // Upload Bank Passbook
+            if (req.files.bankPassbook && req.files.bankPassbook[0]) {
+                const passbookFile = req.files.bankPassbook[0];
+                const passbookFileName = `passbook_${Date.now()}_${path.extname(passbookFile.originalname)}`;
+                kycImages.bankPassbookUrl = await uploadFileToStorage(passbookFile, passbookFileName, folderPath);
+            }
+        } catch (uploadError) {
+            console.error('Error uploading KYC documents:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload KYC documents.',
+                error: uploadError.message,
+            });
+        }
+
+        // Prepare user data for the main collection
+        const userData = {
+            name: name,
+            phoneNo: phoneNo,
+            email: email || null,
+            password: hashedPassword,
+            referralId: referralId || null,
+            tokens: 200,
+            city: city,
+            state: state,
+            createdAt: createdAt,
+            kycStatus: 'submitted',
+            kycSubmittedAt: createdAt,
+        };
+
+        // Save user data to the Users main collection
+        await dbRef.ref(`/Users/${userPath}`).set(userData);
+
+        // Prepare user data for the subcollection (UserIds)
+        const userIdsData = {
+            myuserid: userId,
+            myrefrelid: myrefrelid,
+        };
+
+        // Save userIds data to the subcollection
+        await dbRef.ref(`/Users/${userPath}/userIds`).set(userIdsData);
+
+        // Save KYC documents URLs to the subcollection
+        const kycData = {
+            aadharCardUrl: kycImages.aadharCardUrl || null,
+            panCardUrl: kycImages.panCardUrl || null,
+            bankPassbookUrl: kycImages.bankPassbookUrl || null,
+            status: 'submitted',
+            submittedAt: createdAt,
+            verifiedAt: null,
+            verifiedBy: null,
+            rejectionReason: null,
+        };
+
+        // Save KYC data to the subcollection
+        await dbRef.ref(`/Users/${userPath}/kyc`).set(kycData);
+
+        // Create custom token for immediate login
+        const customToken = await firebaseAdmin.auth().createCustomToken(userRecord.uid);
+
+        // ============ SUCCESS RESPONSE ============
+        res.status(201).json({
+            success: true,
+            message: "User registered successfully in both binary and regular systems with KYC documents",
+            
+            // Binary registration data
+            binaryData: {
+                userId: userId,
+                referralId: referrerUserId || null,
+                message: "Binary user registered successfully"
+            },
+            
+            // Regular user data
+            authUid: userRecord.uid,
+            customToken,
+            userData: {
+                userId: userPath,
+                name,
+                phoneNo,
+                email: email || null,
+                referralId: referralId || null,
+                tokens: 200,
+                city,
+                state,
+                createdAt,
+                kycStatus: 'submitted',
+            },
+            userIdsData: userIdsData,
+            kycData: {
+                status: 'submitted',
+                submittedAt: createdAt,
+                documentsUploaded: {
+                    aadharCard: !!kycImages.aadharCardUrl,
+                    panCard: !!kycImages.panCardUrl,
+                    bankPassbook: !!kycImages.bankPassbookUrl,
+                }
+            }
+        });
+
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        console.error('Error in registerUser:', error);
+        
+        // Cleanup: If user was created in Firebase Auth but other operations failed
+        if (error.message && error.message.includes('auth')) {
+            try {
+                await firebaseAdmin.auth().deleteUser(userRecord?.uid);
+            } catch (cleanupError) {
+                console.error('Error during cleanup:', cleanupError);
+            }
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to register user.',
+            error: error.message,
+        });
     }
 });
 
@@ -3762,6 +4024,336 @@ app.get("/api/admin-binary-tree-by-date-range", async (req, res) => {
         return res.status(500).json({ error: error.message });
     }
 });
+
+
+//User Accept Reject kyc related apis
+
+// API 1: Accept KYC Request
+app.post('/api/kyc/accept/:userIdentifier', async (req, res) => {
+  try {
+    const { userIdentifier } = req.params;
+    
+    if (!userIdentifier) {
+      return res.status(400).json({ success: false, message: 'User identifier is required' });
+    }
+
+    // Initialize Firebase reference
+    const usersRef = db.ref('Users');
+    
+    // Search for user by myuserid
+    const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
+    
+    if (!snapshot.exists()) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Get the user key (like 'user-3')
+    const userKey = Object.keys(snapshot.val())[0];
+    const userRef = usersRef.child(userKey);
+
+    // Update KYC status
+    await userRef.update({
+      kycStatus: 'accepted',
+      kycAcceptedAt: new Date().toISOString()
+    });
+
+    res.json({ 
+      success: true,
+      message: 'KYC accepted successfully',
+      data: {
+        userId: userIdentifier,
+        firebaseKey: userKey,
+        acceptedAt: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error accepting KYC:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// API 2: Reject KYC Request
+app.post('/api/kyc/reject/:userIdentifier', async (req, res) => {
+  try {
+    const { userIdentifier } = req.params;
+    const { rejectionReason } = req.body;
+
+    // 1. Validation
+    if (!userIdentifier) {
+      return res.status(400).json({ success: false, message: 'User identifier is required' });
+    }
+    if (!rejectionReason?.trim()) {
+      return res.status(400).json({ success: false, message: 'Rejection reason is required' });
+    }
+
+    // 2. Locate user
+    const usersRef = db.ref('Users');
+    const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
+    if (!snapshot.exists()) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const userKey = Object.keys(snapshot.val())[0];
+    const userRef = usersRef.child(userKey);
+    const userData = snapshot.val()[userKey];
+    const userIdsData = userData.userIds || {};
+    const kycData = userData.kyc || {};
+    const bucket = firebaseAdmin.storage().bucket();
+
+    // 3. Delete KYC documents from Storage
+    const deleteFile = async (url, label = '') => {
+      try {
+        if (!url || typeof url !== 'string') {
+          console.log(`❌ Skipping ${label}: Invalid or empty URL`);
+          return { success: true }; // continue
+        }
+
+        let filePath = '';
+
+        // Firebase default hosted format
+        if (url.includes('/o/')) {
+          filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
+        }
+
+        // Custom hosted bucket format (e.g., Google Cloud Storage direct links)
+        else if (url.includes('/naphex-game.firebasestorage.app/')) {
+          const parts = url.split('/naphex-game.firebasestorage.app/');
+          if (parts.length > 1) filePath = parts[1];
+        }
+
+        if (!filePath) {
+          console.log(`❌ Unable to parse file path for ${label}`);
+          return { success: false, label };
+        }
+
+        await bucket.file(filePath).delete();
+        console.log(`✅ Deleted ${label}: ${filePath}`);
+        return { success: true };
+      } catch (err) {
+        console.error(`❌ Error deleting ${label}:`, err.message);
+        return { success: false, label, error: err.message };
+      }
+    };
+
+    const deletionResults = await Promise.all([
+      deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
+      deleteFile(kycData.panCardUrl, 'panCardUrl'),
+      deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl')
+    ]);
+
+    const failedDeletions = deletionResults.filter(result => !result.success);
+    if (failedDeletions.length > 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete KYC documents',
+        failedFiles: failedDeletions
+      });
+    }
+
+    // 4. Log to rejectedrequested (without KYC URLs)
+    const rejectedRequestRef = db.ref('rejectedrequested').push();
+    await rejectedRequestRef.set({
+      userId: userIdentifier,
+      userName: userData.name || 'N/A',
+      phoneNo: userData.phoneNo || 'N/A',
+      email: userData.email || 'N/A',
+      rejectionReason: rejectionReason.trim(),
+      rejectedAt: new Date().toISOString(),
+      rejectedBy: 'admin',
+      originalKycSubmittedAt: userData.kycSubmittedAt || null,
+      firebaseKey: userKey
+    });
+
+    // 5. Delete Firebase Auth
+    try {
+      let authUser = null;
+      if (userData.phoneNo) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
+        } catch {}
+      }
+      if (!authUser && userData.email) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
+        } catch {}
+      }
+      if (authUser) {
+        await firebaseAdmin.auth().deleteUser(authUser.uid);
+        console.log('✅ Deleted Firebase auth user:', authUser.uid);
+      }
+    } catch (authErr) {
+      console.error('❌ Auth deletion error:', authErr.message);
+    }
+
+    // 6. Remove from binaryUsers
+    if (userIdsData.myrefrelid) {
+      const binaryUsersRef = db.ref('binaryUsers');
+      const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
+
+      if (binarySnapshot.exists()) {
+        const binaryKey = Object.keys(binarySnapshot.val())[0];
+        const binaryData = binarySnapshot.val()[binaryKey];
+
+        if (binaryData.referralId) {
+          const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
+          const parentSnap = await parentRef.once('value');
+          const parentData = parentSnap.val();
+
+          if (parentData) {
+            const updates = {};
+            if (parentData.leftChild === binaryKey) updates.leftChild = null;
+            if (parentData.rightChild === binaryKey) updates.rightChild = null;
+
+            if (Object.keys(updates).length) await parentRef.update(updates);
+          }
+        }
+
+        await binaryUsersRef.child(binaryKey).remove();
+        console.log('✅ Removed user from binaryUsers');
+      }
+    }
+
+    // 7. Delete main user record
+    await userRef.remove();
+    console.log('✅ Removed user document from Users');
+
+    // 8. Respond success
+    res.json({
+      success: true,
+      message: 'KYC rejected and user completely removed.',
+      data: {
+        userId: userIdentifier,
+        firebaseKey: userKey,
+        rejectedRequestId: rejectedRequestRef.key,
+        deletedAuthMethods: {
+          phone: !!userData.phoneNo,
+          email: !!userData.email
+        },
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('❌ KYC rejection process error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process KYC rejection',
+      error: error.message
+    });
+  }
+});
+
+
+app.get("/api/rejected-requests", async (req, res) => {
+  try {
+    const ref = db.ref("rejectedrequested");
+    ref.once("value", (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return res.status(404).json({ message: "No rejected requests found." });
+
+      const formatted = Object.keys(data).map((key) => ({
+        id: key,
+        ...data[key],
+      }));
+
+      res.json(formatted);
+    });
+  } catch (error) {
+    console.error("Error fetching rejected requests:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+
+
+//Block Unblock Users
+app.put('/api/users/:userId/status', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { status } = req.body;
+
+        // Input validation
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is required'
+            });
+        }
+
+        if (!status || !['active', 'blocked'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Status must be either "active" or "blocked"'
+            });
+        }
+
+        const usersRef = db.ref('/Users');
+
+        // Get all users
+        const snapshot = await usersRef.once('value');
+        const users = snapshot.val();
+
+        let matchedUserKey = null;
+
+        // Find userKey where userIds.myuserid matches userId param
+        for (const key in users) {
+            const user = users[key];
+            if (user?.userIds?.myuserid === userId) {
+                matchedUserKey = key;
+                break;
+            }
+        }
+
+        if (!matchedUserKey) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found with provided myuserid'
+            });
+        }
+
+        const userRef = usersRef.child(matchedUserKey);
+
+        const blocked = status === 'blocked';
+        const updateData = {
+            status: status,
+            blocked: blocked,
+            updatedAt: new Date().toISOString()
+        };
+
+        await userRef.update(updateData);
+
+        console.log(`✅ Updated ${matchedUserKey} (myuserid: ${userId}) to status: ${status}`);
+
+        res.status(200).json({
+            success: true,
+            message: `User ${status === 'blocked' ? 'blocked' : 'unblocked'} successfully`,
+            data: {
+                userKey: matchedUserKey,
+                myuserid: userId,
+                status,
+                blocked,
+                updatedAt: updateData.updatedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error updating user status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating user status',
+            error: error.message
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
 
 
 //Server
