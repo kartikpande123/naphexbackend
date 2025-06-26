@@ -76,11 +76,9 @@ const bucket = admin.storage().bucket();
 // Edumarc SMS API Configuration
 const EDUMARC_API_URL = 'https://smsapi.edumarcsms.com/api/v1/sendsms';
 const API_KEY = '0d9b7e18eb384af2975f47a75b62a433';
-const SENDER_ID = 'EDUMRC';
-const TEMPLATE_ID = '1707168926925165526';
+const SENDER_ID = 'NADENT';
+const TEMPLATE_ID = '1707175077320499396';
 
-// // * API for user login with phone and password
-// const bcrypt = require('bcrypt'); // Assuming bcrypt is used for hashing passwords
 
 
 app.get("/", (req,res)=>{
@@ -487,78 +485,62 @@ app.post('/api/verify-otp', async (req, res) => {
 app.post('/api/send-otp', async (req, res) => {
     const { phoneNo } = req.body;
 
-    // Validate the phone number
-    if (!phoneNo) {
+    // ✅ Validate phone number
+    if (!phoneNo || !/^\d{10}$/.test(phoneNo)) {
         return res.status(400).json({
             success: false,
-            message: 'Phone number is required.'
-        });
-    }
-
-    // Validate phone number format (10 digits)
-    if (!/^\d{10}$/.test(phoneNo)) {
-        return res.status(400).json({
-            success: false,
-            message: 'Invalid phone number format. Please provide a 10-digit number.'
+            message: 'Valid 10-digit phone number is required.'
         });
     }
 
     try {
-        // Generate a 6-digit OTP
+        // ✅ Generate 6-digit OTP
         const otp = crypto.randomInt(100000, 999999).toString();
 
-        // Create the message following Edumarc's template format
-        const message = `Your verification OTP for verification is: ${otp}. OTP is confidential, refrain from sharing it with anyone. By Edumarc Technologies`;
+        // ✅ Format message matching approved template
+        const message = `Your OTP for login or password reset on https://www.naphex.com is: ${otp}. Do not share it with anyone. - NADENT`;
 
         const payload = {
-            number: [phoneNo],
-            message: message,
+            number: phoneNo, // ✅ send as string, not array
+            message,
             senderId: SENDER_ID,
             templateId: TEMPLATE_ID
         };
 
-        // Make the API request to Edumarc
-        const response = await axios({
-            method: 'POST',
-            url: EDUMARC_API_URL,
+        // ✅ Send SMS via Edumarc
+        const response = await axios.post(EDUMARC_API_URL, payload, {
             headers: {
                 'Content-Type': 'application/json',
                 'apikey': API_KEY
-            },
-            data: payload
+            }
         });
 
-        // Log the response for debugging
-        console.log('SMS API Response:', response.data);
+        console.log('🟡 SMS API Full Response:', response.status, response.data);
 
-        // Check the response
-        if (response.data && response.status === 200) {
+        // ✅ Handle Edumarc response
+        if (response.data && response.data.success === true) {
             return res.status(200).json({
                 success: true,
                 message: 'OTP sent successfully',
-                transactionId: response.data.transactionId, // If provided by API
-                debug: {
-                    otp: otp // Remove in production
-                }
+                transactionId: response.data.data.transactionId,
+                debug: { otp } // ✅ Always return for testing
             });
         } else {
-            throw new Error('Failed to send OTP');
+            throw new Error(response.data?.data?.msg || 'SMS API error');
         }
 
     } catch (error) {
-        console.error('Error details:', {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status
-        });
-
-        return res.status(error.response?.status || 500).json({
+        console.error('🔴 Error sending OTP:', error.response?.data || error.message);
+        return res.status(500).json({
             success: false,
-            message: error.response?.data?.message || 'Failed to send OTP. Please try again later.',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Failed to send OTP. Try again later.',
+            error: error.response?.data || error.message
         });
     }
 });
+
+
+
 
 /**
  * API to add user and their subcollection to Firebase.
