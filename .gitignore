@@ -23,5 +23,6 @@ pids
 *.seed
 *.pid.lock
 
-
+# Environment files
 .env
+.nv
