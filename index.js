@@ -4331,6 +4331,303 @@ app.put('/api/users/:userId/status', async (req, res) => {
 
 
 
+//Payment gateway apis
+
+// 🔒 Entry Fee (₹500) API
+// Cashfree Configuration
+const CASHFREE_CONFIG = {
+  appId: process.env.CASHFREE_APP_ID,
+  secretKey: process.env.CASHFREE_SECRET_KEY,
+  baseUrl: 'https://sandbox.cashfree.com/pg', // Use 'https://api.cashfree.com/pg' for production
+};
+
+// Generate Cashfree signature for request authentication
+function generateSignature(postData, timestamp) {
+  const signatureData = postData + timestamp;
+  return crypto
+    .createHmac('sha256', CASHFREE_CONFIG.secretKey)
+    .update(signatureData)
+    .digest('base64');
+}
+
+// API 1: Create Order
+app.post('/api/create-order', async (req, res) => {
+  const { phoneNo, amount, currency = 'INR', orderNote = 'Payment for game tokens' } = req.body;
+
+  if (!phoneNo || !amount || amount <= 0) {
+    return res.status(400).json({ error: "Missing or invalid phoneNo or amount" });
+  }
+
+  try {
+    const orderId = `ORDER_${phoneNo}_${Date.now()}`;
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+
+    const orderData = {
+      order_id: orderId,
+      order_amount: amount,
+      order_currency: currency,
+      order_note: orderNote,
+      customer_details: {
+        customer_id: phoneNo,
+        customer_phone: "9999999999",
+        customer_email: "user@example.com"
+      },
+      order_meta: {
+        return_url: `${process.env.API_BASE_URL}/payment-success`,
+        notify_url: `${process.env.API_BASE_URL}/api/payment-webhook`
+      }
+    };
+
+    // 🔄 Get user details from Firebase
+    const userRef = db.ref(`users/${phoneNo}`);
+    const userSnapshot = await userRef.once('value');
+    const userData = userSnapshot.val();
+
+    if (userData) {
+      if (userData.phone) orderData.customer_details.customer_phone = userData.phone;
+      if (userData.email) orderData.customer_details.customer_email = userData.email;
+    }
+
+    const postData = JSON.stringify(orderData);
+    const signature = generateSignature(postData, timestamp);
+
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'x-api-version': '2023-08-01',
+      'x-client-id': CASHFREE_CONFIG.appId,
+      'x-client-secret': CASHFREE_CONFIG.secretKey,
+      'x-request-timestamp': timestamp,
+      'x-request-signature': signature
+    };
+
+    const response = await axios.post(
+      `${CASHFREE_CONFIG.baseUrl}/orders`,
+      orderData,
+      { headers }
+    );
+
+    const orderRef = db.ref(`orders/${orderId}`);
+    await orderRef.set({
+      userId: phoneNo,
+      amount: amount,
+      currency: currency,
+      status: 'created',
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+      cashfreeOrderId: response.data.order_id,
+      paymentSessionId: response.data.payment_session_id
+    });
+
+    res.json({
+      success: true,
+      orderId: orderId,
+      paymentSessionId: response.data.payment_session_id,
+      orderToken: response.data.order_token,
+      cashfreeOrderId: response.data.order_id
+    });
+
+  } catch (error) {
+    console.error('Create order error:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: "Failed to create order",
+      details: error.response?.data?.message || error.message
+    });
+  }
+});
+
+
+// API 2: Verify Order
+app.post('/api/verify-order', async (req, res) => {
+  const { orderId } = req.body;
+
+  if (!orderId) {
+    return res.status(400).json({ error: "Missing orderId" });
+  }
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const postData = JSON.stringify({ order_id: orderId });
+    const signature = generateSignature(postData, timestamp);
+
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'x-api-version': '2023-08-01',
+      'x-client-id': CASHFREE_CONFIG.appId,
+      'x-client-secret': CASHFREE_CONFIG.secretKey,
+      'x-request-timestamp': timestamp,
+      'x-request-signature': signature
+    };
+
+    const response = await axios.get(
+      `${CASHFREE_CONFIG.baseUrl}/orders/${orderId}`,
+      { headers }
+    );
+
+    const orderStatus = response.data.order_status;
+    const paymentDetails = response.data;
+
+    const orderRef = db.ref(`orders/${orderId}`);
+    const orderSnapshot = await orderRef.once('value');
+    const orderData = orderSnapshot.val();
+
+    if (!orderData) {
+      return res.status(404).json({ error: "Order not found in database" });
+    }
+
+    await orderRef.update({
+      status: orderStatus.toLowerCase(),
+      verifiedAt: admin.database.ServerValue.TIMESTAMP,
+      paymentDetails: paymentDetails
+    });
+
+    if (orderStatus === 'PAID') {
+      const phoneNo = orderData.userId;
+      const amount = orderData.amount;
+
+      // You can add additional logic here for specific types of payments
+
+      res.json({
+        success: true,
+        orderId: orderId,
+        status: orderStatus,
+        amount: amount,
+        userId: phoneNo,
+        paymentDetails: paymentDetails,
+        message: "Payment verified successfully"
+      });
+    } else {
+      res.json({
+        success: false,
+        orderId: orderId,
+        status: orderStatus,
+        message: `Payment status: ${orderStatus}`
+      });
+    }
+
+  } catch (error) {
+    console.error('Verify order error:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: "Failed to verify order",
+      details: error.response?.data?.message || error.message
+    });
+  }
+});
+
+
+app.post('/api/pay-entry-fee', async (req, res) => {
+  const { phoneNo, paymentDetails, orderId } = req.body;
+
+  if (!phoneNo || !paymentDetails || !orderId) {
+    return res.status(400).json({ error: "Missing phoneNo, paymentDetails, or orderId" });
+  }
+
+  try {
+    const usersSnap = await db.ref('Users').once('value');
+    const users = usersSnap.val();
+
+    let userKey = null;
+
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userRef = db.ref(`Users/${userKey}`);
+
+    // Update entry fee flag and store order info under the user
+    await userRef.update({
+      entryFee: "paid",
+      entryFeePaidAt: admin.database.ServerValue.TIMESTAMP,
+      entryFeeOrderId: orderId
+    });
+
+    // Save order under user subcollection
+    await db.ref(`Users/${userKey}/orders/${orderId}`).set({
+      type: "entry_fee",
+      paymentDetails,
+      status: "paid",
+      processedAt: admin.database.ServerValue.TIMESTAMP
+    });
+
+    res.json({ success: true, message: "Entry fee recorded successfully." });
+
+  } catch (err) {
+    console.error("Entry fee error:", err);
+    res.status(500).json({ error: "Failed to record entry fee." });
+  }
+});
+
+
+app.post('/api/add-tokens', async (req, res) => {
+  const { phoneNo, orderId, amount } = req.body;
+
+  if (!phoneNo || !orderId || !amount) {
+    return res.status(400).json({ error: "Missing phoneNo, orderId, or amount" });
+  }
+
+  try {
+    const usersSnap = await db.ref('Users').once('value');
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey || !userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if this order is already processed
+    const orderRef = db.ref(`Users/${userKey}/orders/${orderId}`);
+    const orderSnap = await orderRef.once('value');
+
+    if (orderSnap.exists()) {
+      return res.status(400).json({ error: "Order already processed" });
+    }
+
+    const newTokenBalance = (userData.tokens || 0) + amount;
+
+    // Update token balance
+    await db.ref(`Users/${userKey}`).update({
+      tokens: newTokenBalance,
+      lastTokenAddition: {
+        amount,
+        orderId,
+        timestamp: admin.database.ServerValue.TIMESTAMP
+      }
+    });
+
+    // Save order under user subcollection
+    await orderRef.set({
+      type: "tokens",
+      amount,
+      status: "paid",
+      processedAt: admin.database.ServerValue.TIMESTAMP
+    });
+
+    res.json({ success: true, tokens: newTokenBalance, tokensAdded: amount });
+
+  } catch (err) {
+    console.error("Add tokens error:", err);
+    res.status(500).json({ error: "Failed to add tokens." });
+  }
+});
+
+
 
 
 
