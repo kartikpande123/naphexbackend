@@ -4637,5 +4637,4 @@ app.post('/api/add-tokens', async (req, res) => {
 //Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
-    console.log("hellpo")
 });
