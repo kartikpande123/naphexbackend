@@ -4332,7 +4332,6 @@ app.put('/api/users/:userId/status', async (req, res) => {
 
 
 //Payment gateway apis
-
 // 🔒 Entry Fee (₹500) API
 // Cashfree Configuration
 const CASHFREE_CONFIG = {
