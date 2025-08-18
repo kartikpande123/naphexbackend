@@ -2804,67 +2804,54 @@ app.post("/api/registerUser", upload.fields([
     { name: 'aadharCard', maxCount: 1 },
     { name: 'panCard', maxCount: 1 },
     { name: 'bankPassbook', maxCount: 1 },
-    { name: 'selfie', maxCount: 1 }
+    { name: 'selfie', maxCount: 1 } // Added selfie field
 ]), async (req, res) => {
-    try {
-        console.log('=== REGISTER USER REQUEST ===');
-        console.log('Body:', req.body);
-        console.log('Files:', req.files ? Object.keys(req.files) : 'No files');
-        console.log('Files detail:', req.files);
+    const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state } = req.body;
 
-        const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state } = req.body;
-
-        // Debug: Log all received fields
-        console.log('Received fields:', {
-            userId: !!userId,
-            name: !!name,
-            referralId: !!referralId,
-            myrefrelid: !!myrefrelid,
-            phoneNo: !!phoneNo,
-            password: !!password,
-            city: !!city,
-            state: !!state
+    // Validate required fields for both binary and regular user creation
+    if (!userId || !name || !myrefrelid || !phoneNo || !password || !city || !state) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing required fields: userId, name, myrefrelid, phoneNo, password, city, state"
         });
+    }
 
-        // Validate required fields
-        if (!userId || !name || !myrefrelid || !phoneNo || !password || !city || !state) {
-            console.log('Missing required fields validation failed');
-            return res.status(400).json({
-                success: false,
-                error: "Missing required fields: userId, name, myrefrelid, phoneNo, password, city, state",
-                received: { userId: !!userId, name: !!name, myrefrelid: !!myrefrelid, phoneNo: !!phoneNo, password: !!password, city: !!city, state: !!state }
-            });
-        }
+    // Validate KYC files including selfie
+    if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.bankPassbook || !req.files.selfie) {
+        return res.status(400).json({
+            success: false,
+            error: 'All KYC documents are required: aadharCard, panCard, bankPassbook, selfie.'
+        });
+    }
 
-        // Validate KYC files
-        if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.bankPassbook || !req.files.selfie) {
-            console.log('KYC files validation failed');
-            console.log('Available files:', req.files ? Object.keys(req.files) : 'none');
-            return res.status(400).json({
-                success: false,
-                error: 'All KYC documents are required: aadharCard, panCard, bankPassbook, selfie.',
-                received: req.files ? Object.keys(req.files) : []
-            });
-        }
-
-        console.log('All validations passed, proceeding with registration...');
-
-        // Binary user registration logic
-        console.log('Starting binary user registration...');
+    try {
+        // ============ BINARY USER REGISTRATION LOGIC ============
         const binaryUsersRef = db.ref("binaryUsers");
         const usersSnapshot = await binaryUsersRef.once("value");
 
         let binaryUpdates = {};
         let referrerUserId = null;
 
-        if (referralId && referralId !== 'root') {
-            // Check if referralId exists
-            usersSnapshot.forEach((child) => {
-                if (child.val().myrefrelid === referralId) {
-                    referrerUserId = child.key;
-                }
-            });
+        // Check if referralId exists in myrefrelid
+        usersSnapshot.forEach((child) => {
+            if (child.val().myrefrelid === referralId) {
+                referrerUserId = child.key;
+            }
+        });
 
+        if (!usersSnapshot.exists()) {
+            // No users exist, create root user
+            binaryUpdates[`binaryUsers/${userId}`] = {
+                name,
+                referralId: null,
+                leftChild: null,
+                rightChild: null,
+                myrefrelid,
+                playedAmounts: {},
+                carryForward: {},
+                bonusReceived: {}
+            };
+        } else {
             if (!referrerUserId) {
                 return res.status(400).json({ 
                     success: false,
@@ -2874,9 +2861,17 @@ app.post("/api/registerUser", upload.fields([
 
             const referrerRef = db.ref(`binaryUsers/${referrerUserId}`);
             const referrerSnapshot = await referrerRef.once("value");
+
+            if (!referrerSnapshot.exists()) {
+                return res.status(400).json({ 
+                    success: false,
+                    error: "Invalid referral ID" 
+                });
+            }
+
             let referrerData = referrerSnapshot.val();
 
-            // Check placement
+            // Check left and right placement
             if (!referrerData.leftChild) {
                 binaryUpdates[`binaryUsers/${referrerUserId}/leftChild`] = userId;
             } else if (!referrerData.rightChild) {
@@ -2887,44 +2882,41 @@ app.post("/api/registerUser", upload.fields([
                     error: "Both referral slots are occupied" 
                 });
             }
+
+            // Create new binary user entry
+            binaryUpdates[`binaryUsers/${userId}`] = {
+                name,
+                referralId: referrerUserId,
+                leftChild: null,
+                rightChild: null,
+                myrefrelid,
+                playedAmounts: {},
+                carryForward: {},
+                bonusReceived: {}
+            };
         }
 
-        // Create binary user entry
-        binaryUpdates[`binaryUsers/${userId}`] = {
-            name,
-            referralId: referrerUserId,
-            leftChild: null,
-            rightChild: null,
-            myrefrelid,
-            playedAmounts: {},
-            carryForward: {},
-            bonusReceived: {}
-        };
-
+        // Update binary users
         await db.ref().update(binaryUpdates);
-        console.log('Binary user created successfully');
 
-        // Regular user creation
-        console.log('Starting regular user creation...');
-
-        // Hash password
+        // ============ REGULAR USER CREATION LOGIC ============
+        
+        // Hash the password
         const hashedPassword = await bcrypt.hash(password, 10);
-        console.log('Password hashed');
 
-        // Create Firebase Auth user
-        console.log('Creating Firebase Auth user...');
+        // Create the user in Firebase Authentication
         const userRecord = await firebaseAdmin.auth().createUser({
             phoneNumber: `+91${phoneNo}`,
             password: password,
             displayName: name,
             email: email || undefined,
         });
-        console.log('Firebase Auth user created:', userRecord.uid);
 
-        // Database operations
+        // Get reference to Users collection
         const dbRef = firebaseAdmin.database();
         const usersRef = dbRef.ref('/Users');
 
+        // Find the highest existing user number
         const snapshot = await usersRef.orderByKey().once('value');
         let highestNumber = 0;
         snapshot.forEach((childSnapshot) => {
@@ -2936,59 +2928,47 @@ app.post("/api/registerUser", upload.fields([
             }
         });
 
+        // Generate next user ID
         const nextUserNumber = highestNumber + 1;
         const userPath = `user-${nextUserNumber}`;
+
+        // Get current date and time
         const createdAt = new Date().toISOString();
 
-        console.log('Generated user path:', userPath);
-
-        // Upload KYC images
-        console.log('Starting file uploads...');
+        // Upload KYC images to Firebase Storage including selfie
         const kycImages = {};
         const folderPath = `kyc-documents/${userPath}`;
 
         try {
-            // Upload files (make sure uploadFileToStorage function exists and works)
-            if (req.files.aadharCard?.[0]) {
-                console.log('Uploading Aadhar card...');
+            // Upload Aadhar Card
+            if (req.files.aadharCard && req.files.aadharCard[0]) {
                 const aadharFile = req.files.aadharCard[0];
-                const aadharFileName = `aadhar_${Date.now()}.jpg`;
+                const aadharFileName = `aadhar_${Date.now()}_${path.extname(aadharFile.originalname)}`;
                 kycImages.aadharCardUrl = await uploadFileToStorage(aadharFile, aadharFileName, folderPath);
-                console.log('Aadhar uploaded:', kycImages.aadharCardUrl);
             }
 
-            if (req.files.panCard?.[0]) {
-                console.log('Uploading PAN card...');
+            // Upload PAN Card
+            if (req.files.panCard && req.files.panCard[0]) {
                 const panFile = req.files.panCard[0];
-                const panFileName = `pan_${Date.now()}.jpg`;
+                const panFileName = `pan_${Date.now()}_${path.extname(panFile.originalname)}`;
                 kycImages.panCardUrl = await uploadFileToStorage(panFile, panFileName, folderPath);
             }
 
-            if (req.files.bankPassbook?.[0]) {
-                console.log('Uploading Bank passbook...');
+            // Upload Bank Passbook
+            if (req.files.bankPassbook && req.files.bankPassbook[0]) {
                 const passbookFile = req.files.bankPassbook[0];
-                const passbookFileName = `passbook_${Date.now()}.jpg`;
+                const passbookFileName = `passbook_${Date.now()}_${path.extname(passbookFile.originalname)}`;
                 kycImages.bankPassbookUrl = await uploadFileToStorage(passbookFile, passbookFileName, folderPath);
             }
 
-            if (req.files.selfie?.[0]) {
-                console.log('Uploading Selfie...');
+            // Upload Selfie
+            if (req.files.selfie && req.files.selfie[0]) {
                 const selfieFile = req.files.selfie[0];
-                const selfieFileName = `selfie_${Date.now()}.jpg`;
+                const selfieFileName = `selfie_${Date.now()}_${path.extname(selfieFile.originalname)}`;
                 kycImages.selfieUrl = await uploadFileToStorage(selfieFile, selfieFileName, folderPath);
             }
-
-            console.log('All files uploaded successfully');
-
         } catch (uploadError) {
-            console.error('File upload error:', uploadError);
-            // Cleanup: Delete Firebase Auth user if created
-            try {
-                await firebaseAdmin.auth().deleteUser(userRecord.uid);
-            } catch (cleanupError) {
-                console.error('Cleanup error:', cleanupError);
-            }
-            
+            console.error('Error uploading KYC documents:', uploadError);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to upload KYC documents.',
@@ -2996,7 +2976,7 @@ app.post("/api/registerUser", upload.fields([
             });
         }
 
-        // Save user data
+        // Prepare user data for the main collection
         const userData = {
             name: name,
             phoneNo: phoneNo,
@@ -3011,20 +2991,24 @@ app.post("/api/registerUser", upload.fields([
             kycSubmittedAt: createdAt,
         };
 
+        // Save user data to the Users main collection
         await dbRef.ref(`/Users/${userPath}`).set(userData);
 
+        // Prepare user data for the subcollection (UserIds)
         const userIdsData = {
             myuserid: userId,
             myrefrelid: myrefrelid,
         };
 
+        // Save userIds data to the subcollection
         await dbRef.ref(`/Users/${userPath}/userIds`).set(userIdsData);
 
+        // Save KYC documents URLs to the subcollection including selfie
         const kycData = {
             aadharCardUrl: kycImages.aadharCardUrl || null,
             panCardUrl: kycImages.panCardUrl || null,
             bankPassbookUrl: kycImages.bankPassbookUrl || null,
-            selfieUrl: kycImages.selfieUrl || null,
+            selfieUrl: kycImages.selfieUrl || null, // Added selfie URL
             status: 'submitted',
             submittedAt: createdAt,
             verifiedAt: null,
@@ -3032,21 +3016,25 @@ app.post("/api/registerUser", upload.fields([
             rejectionReason: null,
         };
 
+        // Save KYC data to the subcollection
         await dbRef.ref(`/Users/${userPath}/kyc`).set(kycData);
 
+        // Create custom token for immediate login
         const customToken = await firebaseAdmin.auth().createCustomToken(userRecord.uid);
 
-        console.log('User registration completed successfully');
-
-        // SUCCESS RESPONSE
+        // ============ SUCCESS RESPONSE ============
         res.status(201).json({
             success: true,
-            message: "User registered successfully",
+            message: "User registered successfully in both binary and regular systems with KYC documents",
+            
+            // Binary registration data
             binaryData: {
                 userId: userId,
                 referralId: referrerUserId || null,
                 message: "Binary user registered successfully"
             },
+            
+            // Regular user data
             authUid: userRecord.uid,
             customToken,
             userData: {
@@ -3069,24 +3057,31 @@ app.post("/api/registerUser", upload.fields([
                     aadharCard: !!kycImages.aadharCardUrl,
                     panCard: !!kycImages.panCardUrl,
                     bankPassbook: !!kycImages.bankPassbookUrl,
-                    selfie: !!kycImages.selfieUrl,
+                    selfie: !!kycImages.selfieUrl, // Added selfie status
                 }
             }
         });
 
     } catch (error) {
-        console.error('ERROR in registerUser:', error);
-        console.error('Error stack:', error.stack);
+        console.error('Error in registerUser:', error);
+        
+        // Cleanup: If user was created in Firebase Auth but other operations failed
+        if (error.message && error.message.includes('auth')) {
+            try {
+                await firebaseAdmin.auth().deleteUser(userRecord?.uid);
+            } catch (cleanupError) {
+                console.error('Error during cleanup:', cleanupError);
+            }
+        }
 
-        // Send proper JSON error response
         res.status(500).json({
             success: false,
-            message: 'Internal server error',
+            message: 'Failed to register user.',
             error: error.message,
-            timestamp: new Date().toISOString()
         });
     }
 });
+
 //Binary refrelid exist check api (signup)
 app.get("/api/checkReferralSlots/:referralId", async (req, res) => {
     try {
@@ -4923,7 +4918,6 @@ app.post('/webhook/cashfree', express.raw({ type: 'application/json' }), async (
 
   res.sendStatus(200);
 });
-
 
 //Server
 app.listen(port, () => {
