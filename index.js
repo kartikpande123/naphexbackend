@@ -4691,6 +4691,233 @@ app.post('/api/add-tokens', async (req, res) => {
 
 
 
+//Withdraw
+const {
+  CASHFREE_CLIENT_ID_PAYOUT,
+  CASHFREE_CLIENT_SECRET_PAYOUT,
+  CASHFREE_ENV = 'sandbox', // 'sandbox' | 'production'
+} = process.env;
+
+if (!CASHFREE_CLIENT_ID_PAYOUT || !CASHFREE_CLIENT_SECRET_PAYOUT) {
+  throw new Error('Missing CASHFREE_CLIENT_ID_PAYOUT or CASHFREE_CLIENT_SECRET_PAYOUT in env.');
+}
+
+const BASE_URL =
+  CASHFREE_ENV === 'production'
+    ? 'https://api.cashfree.com/payout'
+    : 'https://sandbox.cashfree.com/payout';
+
+const cf = axios.create({
+  baseURL: BASE_URL,
+  timeout: 15000,
+});
+
+// attach headers
+cf.interceptors.request.use((config) => {
+  config.headers['Content-Type'] = 'application/json';
+  config.headers['x-api-version'] = '2024-01-01';
+  config.headers['x-client-id'] = CASHFREE_CLIENT_ID_PAYOUT;
+  config.headers['x-client-secret'] = CASHFREE_CLIENT_SECRET_PAYOUT;
+  config.headers['x-request-id'] = uuidv4();
+  return config;
+});
+
+//
+// ---------- Cashfree API Helpers ----------
+//
+
+// Create Standard Transfer
+async function createTransfer({ transfer_id, transfer_amount, beneficiary_details }) {
+  const { data } = await cf.post('/transfers', {
+    transfer_id,
+    transfer_amount,
+    beneficiary_details,
+  });
+  return data;
+}
+
+// Get Transfer Status V2
+async function getTransferStatus({ transferId, cfTransferId }) {
+  const params = {};
+  if (transferId) params.transfer_id = transferId;
+  if (cfTransferId) params.cf_transfer_id = cfTransferId;
+  if (!params.transfer_id && !params.cf_transfer_id) {
+    throw new Error('Provide either transferId or cfTransferId');
+  }
+  const { data } = await cf.get('/transfers', { params });
+  return data;
+}
+
+// Create Beneficiary
+async function createBeneficiary(beneficiaryPayload) {
+  const { data } = await cf.post('/beneficiary', beneficiaryPayload);
+  return data;
+}
+
+// Batch Transfer
+async function createBatchTransfer(batchId, transfersArray) {
+  const resp = await cf.post('/transfers/batch', {
+    batch_transfer_id: batchId,
+    transfers: transfersArray,
+  });
+  return resp.data;
+}
+
+// Batch Status
+async function getBatchStatus(batchId) {
+  const resp = await cf.get('/batch/transfers', {
+    params: { batch_transfer_id: batchId },
+  });
+  return resp.data;
+}
+
+//
+// ---------- Express Endpoints ----------
+//
+
+// Transfer Status
+app.get('/api/cashfree/transfer-status', async (req, res) => {
+  try {
+    const { transferId, cfTransferId } = req.query;
+    const data = await getTransferStatus({ transferId, cfTransferId });
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.response?.data || { message: err.message },
+    });
+  }
+});
+
+// Create Beneficiary
+app.post('/api/cashfree/create-beneficiary', async (req, res) => {
+  try {
+    const data = await createBeneficiary(req.body);
+    res.status(201).json({ ok: true, data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.response?.data || { message: err.message },
+    });
+  }
+});
+
+// Batch Transfer
+app.post('/api/cashfree/batch-transfer', async (req, res) => {
+  try {
+    const { batch_transfer_id, transfers } = req.body;
+    const data = await createBatchTransfer(batch_transfer_id, transfers);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.response?.data || err.message,
+    });
+  }
+});
+
+// Batch Status
+app.get('/api/cashfree/batch-status', async (req, res) => {
+  try {
+    const { batch_transfer_id } = req.query;
+    const data = await getBatchStatus(batch_transfer_id);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({
+      ok: false,
+      error: err.response?.data || err.message,
+    });
+  }
+});
+
+// Initiate Withdrawal
+app.post('/api/withdraw', async (req, res) => {
+  const { phoneNo, amount, transferId } = req.body;
+  if (!phoneNo || !amount || !transferId) {
+    return res.status(400).json({ error: "Missing phoneNo, amount, or transferId" });
+  }
+
+  // Locate user
+  const usersSnap = await db.ref('Users').once('value');
+  const users = usersSnap.val() || {};
+  const userEntry = Object.entries(users).find(([_, user]) => user.phoneNo === phoneNo);
+
+  if (!userEntry) return res.status(404).json({ error: "User not found" });
+  const [userKey, userData] = userEntry;
+
+  const currentTokens = userData.tokens || 0;
+  if (currentTokens < amount) {
+    return res.status(400).json({ error: "Insufficient tokens to withdraw" });
+  }
+
+  // Reserve tokens immediately
+  const newBalance = currentTokens - amount;
+  await db.ref(`Users/${userKey}`).update({ tokens: newBalance });
+
+  // Create pending withdrawal record
+  await db.ref(`withdrawals/${transferId}`).set({
+    phoneNo,
+    amount,
+    userKey,
+    status: "PENDING",
+    requestedAt: admin.database.ServerValue.TIMESTAMP
+  });
+
+  try {
+    // Initiate Cashfree transfer
+    const cfResponse = await createTransfer({
+      transfer_id: transferId,
+      transfer_amount: amount,
+      beneficiary_details: { beneficiary_id: userData.beneficiaryId }
+    });
+    res.json({ success: true, data: cfResponse });
+  } catch (err) {
+    // Refund on error
+    await db.ref(`Users/${userKey}`).update({ tokens: currentTokens });
+    await db.ref(`withdrawals/${transferId}`).update({ status: 'FAILED', failedAt: admin.database.ServerValue.TIMESTAMP });
+    res.status(500).json({ success: false, error: err.response?.data || err.message });
+  }
+});
+
+//
+// ---------- Webhook ----------
+//
+app.post('/webhook/cashfree', express.raw({ type: 'application/json' }), async (req, res) => {
+  const signature = req.headers['x-cf-signature'];
+  const timestamp = req.headers['x-cf-timestamp'];
+  const rawBody = req.body;
+  const bodyJson = JSON.parse(rawBody.toString());
+
+  const withdrawal = await db.ref(`withdrawals/${bodyJson.data.transfer_id}`).once('value');
+  if (!withdrawal.exists()) {
+    return res.sendStatus(200);
+  }
+
+  // Signature verification
+  const computed = crypto.createHmac('sha256', process.env.CASHFREE_CLIENT_SECRET_PAYOUT)
+                         .update(timestamp + rawBody)
+                         .digest('base64');
+  if (computed !== signature) {
+    return res.status(400).send('Invalid signature');
+  }
+
+  const event = bodyJson.event;
+  const transferId = bodyJson.data.transfer_id;
+  const amount = bodyJson.data.transfer_amount;
+
+  if (event === 'TRANSFER_SUCCESS') {
+    await db.ref(`withdrawals/${transferId}`).update({ status: 'COMPLETED', completedAt: admin.database.ServerValue.TIMESTAMP });
+  } else if (['TRANSFER_FAILED', 'TRANSFER_REJECTED'].includes(event)) {
+    const wd = withdrawal.val();
+    const userSnap = await db.ref(`Users/${wd.userKey}`).once('value');
+    const user = userSnap.val();
+    const refundBalance = (user.tokens || 0) + amount;
+    await db.ref(`Users/${wd.userKey}`).update({ tokens: refundBalance });
+    await db.ref(`withdrawals/${transferId}`).update({ status: 'FAILED', failedAt: admin.database.ServerValue.TIMESTAMP });
+  }
+
+  res.sendStatus(200);
+});
 
 //Server
 app.listen(port, () => {
