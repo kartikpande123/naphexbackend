@@ -13,6 +13,7 @@ const sharp = require("sharp")
 const app = express();
 const status = require("express-status-monitor");
 const path = require("path")
+const { v4: uuidv4 } = require('uuid');
 
 
 const allowedOrigins = [
@@ -2802,7 +2803,8 @@ const uploadFileToStorage = async (file, fileName, folderPath) => {
 app.post("/api/registerUser", upload.fields([
     { name: 'aadharCard', maxCount: 1 },
     { name: 'panCard', maxCount: 1 },
-    { name: 'bankPassbook', maxCount: 1 }
+    { name: 'bankPassbook', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 } // Added selfie field
 ]), async (req, res) => {
     const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state } = req.body;
 
@@ -2814,11 +2816,11 @@ app.post("/api/registerUser", upload.fields([
         });
     }
 
-    // Validate KYC files
-    if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.bankPassbook) {
+    // Validate KYC files including selfie
+    if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.bankPassbook || !req.files.selfie) {
         return res.status(400).json({
             success: false,
-            error: 'All KYC documents are required: aadharCard, panCard, bankPassbook.'
+            error: 'All KYC documents are required: aadharCard, panCard, bankPassbook, selfie.'
         });
     }
 
@@ -2933,7 +2935,7 @@ app.post("/api/registerUser", upload.fields([
         // Get current date and time
         const createdAt = new Date().toISOString();
 
-        // Upload KYC images to Firebase Storage
+        // Upload KYC images to Firebase Storage including selfie
         const kycImages = {};
         const folderPath = `kyc-documents/${userPath}`;
 
@@ -2957,6 +2959,13 @@ app.post("/api/registerUser", upload.fields([
                 const passbookFile = req.files.bankPassbook[0];
                 const passbookFileName = `passbook_${Date.now()}_${path.extname(passbookFile.originalname)}`;
                 kycImages.bankPassbookUrl = await uploadFileToStorage(passbookFile, passbookFileName, folderPath);
+            }
+
+            // Upload Selfie
+            if (req.files.selfie && req.files.selfie[0]) {
+                const selfieFile = req.files.selfie[0];
+                const selfieFileName = `selfie_${Date.now()}_${path.extname(selfieFile.originalname)}`;
+                kycImages.selfieUrl = await uploadFileToStorage(selfieFile, selfieFileName, folderPath);
             }
         } catch (uploadError) {
             console.error('Error uploading KYC documents:', uploadError);
@@ -2994,11 +3003,12 @@ app.post("/api/registerUser", upload.fields([
         // Save userIds data to the subcollection
         await dbRef.ref(`/Users/${userPath}/userIds`).set(userIdsData);
 
-        // Save KYC documents URLs to the subcollection
+        // Save KYC documents URLs to the subcollection including selfie
         const kycData = {
             aadharCardUrl: kycImages.aadharCardUrl || null,
             panCardUrl: kycImages.panCardUrl || null,
             bankPassbookUrl: kycImages.bankPassbookUrl || null,
+            selfieUrl: kycImages.selfieUrl || null, // Added selfie URL
             status: 'submitted',
             submittedAt: createdAt,
             verifiedAt: null,
@@ -3047,6 +3057,7 @@ app.post("/api/registerUser", upload.fields([
                     aadharCard: !!kycImages.aadharCardUrl,
                     panCard: !!kycImages.panCardUrl,
                     bankPassbook: !!kycImages.bankPassbookUrl,
+                    selfie: !!kycImages.selfieUrl, // Added selfie status
                 }
             }
         });
@@ -4526,7 +4537,6 @@ app.post('/api/pay-entry-fee', async (req, res) => {
     const users = usersSnap.val();
 
     let userKey = null;
-
     for (const [key, user] of Object.entries(users || {})) {
       if (user.phoneNo === phoneNo) {
         userKey = key;
@@ -4540,28 +4550,55 @@ app.post('/api/pay-entry-fee', async (req, res) => {
 
     const userRef = db.ref(`Users/${userKey}`);
 
-    // Update entry fee flag and store order info under the user
+    // Fixed entry fee
+    const amountPaid = 500;
+
+    // Calculate tax and credited amount
+    const taxAmount = +(amountPaid * 0.28).toFixed(2); // 28% tax
+    const creditedAmount = +(amountPaid - taxAmount).toFixed(2); // 72% amount
+
+    // ===== 1. Update User Main Data (NO entryFeeTax object) =====
     await userRef.update({
       entryFee: "paid",
       entryFeePaidAt: admin.database.ServerValue.TIMESTAMP,
-      entryFeeOrderId: orderId
+      entryFeeOrderId: orderId,
+      entryFeeAmount: amountPaid
     });
 
-    // Save order under user subcollection
+    // ===== 2. Add to User's Orders Sub-Collection (NO creditedAmount here) =====
     await db.ref(`Users/${userKey}/orders/${orderId}`).set({
       type: "entry_fee",
       paymentDetails,
+      amountPaid,
+      taxAmount,
+      taxRate: "28%",
       status: "paid",
       processedAt: admin.database.ServerValue.TIMESTAMP
     });
 
-    res.json({ success: true, message: "Entry fee recorded successfully." });
+    // ===== 3. Update Main Orders Collection (with creditedAmount) =====
+    await db.ref(`orders/${orderId}`).update({
+      taxAmount,
+      creditedAmount,
+      taxRate: "28%",
+      taxDate: admin.database.ServerValue.TIMESTAMP
+    });
+
+    res.json({
+      success: true,
+      message: "Entry fee recorded successfully with tax.",
+      amountPaid,
+      taxAmount,
+      creditedAmount
+    });
 
   } catch (err) {
     console.error("Entry fee error:", err);
     res.status(500).json({ error: "Failed to record entry fee." });
   }
 });
+
+
 
 
 app.post('/api/add-tokens', async (req, res) => {
@@ -4590,35 +4627,60 @@ app.post('/api/add-tokens', async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if this order is already processed
-    const orderRef = db.ref(`Users/${userKey}/orders/${orderId}`);
-    const orderSnap = await orderRef.once('value');
-
-    if (orderSnap.exists()) {
+    // Check if this order is already processed in user's orders
+    const userOrderRef = db.ref(`Users/${userKey}/orders/${orderId}`);
+    const userOrderSnap = await userOrderRef.once('value');
+    if (userOrderSnap.exists()) {
       return res.status(400).json({ error: "Order already processed" });
     }
 
-    const newTokenBalance = (userData.tokens || 0) + amount;
+    // Calculate tax and credited tokens
+    const taxAmount = +(amount * 0.28).toFixed(2);
+    const creditedTokens = +(amount - taxAmount).toFixed(2);
 
-    // Update token balance
+    const newTokenBalance = (userData.tokens || 0) + creditedTokens;
+
+    // ===== 1. Update User's Token Balance =====
     await db.ref(`Users/${userKey}`).update({
       tokens: newTokenBalance,
       lastTokenAddition: {
-        amount,
+        amountPaid: amount,
+        taxAmount,
+        creditedTokens,
+        taxRate: "28%",
         orderId,
         timestamp: admin.database.ServerValue.TIMESTAMP
       }
     });
 
-    // Save order under user subcollection
-    await orderRef.set({
+    // ===== 2. Save Order in User's Orders Sub-Collection =====
+    await userOrderRef.set({
       type: "tokens",
-      amount,
+      amountPaid: amount,
+      taxAmount,
+      creditedTokens,
+      taxRate: "28%",
       status: "paid",
       processedAt: admin.database.ServerValue.TIMESTAMP
     });
 
-    res.json({ success: true, tokens: newTokenBalance, tokensAdded: amount });
+    // ===== 3. Update Main Orders Collection with Tax Info =====
+    await db.ref(`orders/${orderId}`).update({
+      taxRate: "28%",
+      taxAmount,
+      creditedAmount: creditedTokens,
+      taxDate: admin.database.ServerValue.TIMESTAMP,
+      // Keep existing fields intact, just add tax info
+      status: "paid"
+    });
+
+    res.json({
+      success: true,
+      tokens: newTokenBalance,
+      tokensAdded: creditedTokens,
+      taxAmount,
+      message: "Tokens added successfully with tax calculation."
+    });
 
   } catch (err) {
     console.error("Add tokens error:", err);
@@ -4629,10 +4691,7 @@ app.post('/api/add-tokens', async (req, res) => {
 
 
 
-
-
-
-
+//Withdraw
 
 //Server
 app.listen(port, () => {
