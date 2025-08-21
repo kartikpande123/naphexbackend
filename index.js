@@ -4691,232 +4691,210 @@ app.post('/api/add-tokens', async (req, res) => {
 
 
 
-//Withdraw
-const {
-  CASHFREE_CLIENT_ID_PAYOUT,
-  CASHFREE_CLIENT_SECRET_PAYOUT,
-  CASHFREE_ENV = 'sandbox', // 'sandbox' | 'production'
-} = process.env;
+// user bank details api
+ app.post('/api/banking/add', async (req, res) => {
+    const { phoneNo, bankAccountNo, ifsc, upiId } = req.body;
 
-if (!CASHFREE_CLIENT_ID_PAYOUT || !CASHFREE_CLIENT_SECRET_PAYOUT) {
-  throw new Error('Missing CASHFREE_CLIENT_ID_PAYOUT or CASHFREE_CLIENT_SECRET_PAYOUT in env.');
-}
+    if (!phoneNo) {
+      return res.status(400).json({ error: "Missing phoneNo" });
+    }
 
-const BASE_URL =
-  CASHFREE_ENV === 'production'
-    ? 'https://api.cashfree.com/payout'
-    : 'https://sandbox.cashfree.com/payout';
+    if ((!bankAccountNo || !ifsc) && !upiId) {
+      return res.status(400).json({ error: "Provide either bankAccountNo+ifsc or upiId" });
+    }
 
-const cf = axios.create({
-  baseURL: BASE_URL,
-  timeout: 15000,
-});
+    try {
+      const usersSnap = await db.ref("Users").once("value");
+      const users = usersSnap.val();
 
-// attach headers
-cf.interceptors.request.use((config) => {
-  config.headers['Content-Type'] = 'application/json';
-  config.headers['x-api-version'] = '2024-01-01';
-  config.headers['x-client-id'] = CASHFREE_CLIENT_ID_PAYOUT;
-  config.headers['x-client-secret'] = CASHFREE_CLIENT_SECRET_PAYOUT;
-  config.headers['x-request-id'] = uuidv4();
-  return config;
-});
+      let userKey = null;
+      for (const [key, user] of Object.entries(users || {})) {
+        if (user.phoneNo === phoneNo) {
+          userKey = key;
+          break;
+        }
+      }
 
-//
-// ---------- Cashfree API Helpers ----------
-//
+      if (!userKey) {
+        return res.status(404).json({ error: "User not found" });
+      }
 
-// Create Standard Transfer
-async function createTransfer({ transfer_id, transfer_amount, beneficiary_details }) {
-  const { data } = await cf.post('/transfers', {
-    transfer_id,
-    transfer_amount,
-    beneficiary_details,
-  });
-  return data;
-}
+      // Save data
+      const bankingRef = db.ref(`Users/${userKey}/bankingDetails`);
+      const bankingId = bankingRef.push().key; // unique id
 
-// Get Transfer Status V2
-async function getTransferStatus({ transferId, cfTransferId }) {
-  const params = {};
-  if (transferId) params.transfer_id = transferId;
-  if (cfTransferId) params.cf_transfer_id = cfTransferId;
-  if (!params.transfer_id && !params.cf_transfer_id) {
-    throw new Error('Provide either transferId or cfTransferId');
-  }
-  const { data } = await cf.get('/transfers', { params });
-  return data;
-}
+      const bankingData = {
+        bankAccountNo: bankAccountNo || null,
+        ifsc: ifsc || null,
+        upiId: upiId || null,
+        createdAt: admin.database.ServerValue.TIMESTAMP
+      };
 
-// Create Beneficiary
-async function createBeneficiary(beneficiaryPayload) {
-  const { data } = await cf.post('/beneficiary', beneficiaryPayload);
-  return data;
-}
+      await bankingRef.child(bankingId).set(bankingData);
 
-// Batch Transfer
-async function createBatchTransfer(batchId, transfersArray) {
-  const resp = await cf.post('/transfers/batch', {
-    batch_transfer_id: batchId,
-    transfers: transfersArray,
-  });
-  return resp.data;
-}
-
-// Batch Status
-async function getBatchStatus(batchId) {
-  const resp = await cf.get('/batch/transfers', {
-    params: { batch_transfer_id: batchId },
-  });
-  return resp.data;
-}
-
-//
-// ---------- Express Endpoints ----------
-//
-
-// Transfer Status
-app.get('/api/cashfree/transfer-status', async (req, res) => {
-  try {
-    const { transferId, cfTransferId } = req.query;
-    const data = await getTransferStatus({ transferId, cfTransferId });
-    res.json({ ok: true, data });
-  } catch (err) {
-    res.status(err.response?.status || 500).json({
-      ok: false,
-      error: err.response?.data || { message: err.message },
-    });
-  }
-});
-
-// Create Beneficiary
-app.post('/api/cashfree/create-beneficiary', async (req, res) => {
-  try {
-    const data = await createBeneficiary(req.body);
-    res.status(201).json({ ok: true, data });
-  } catch (err) {
-    res.status(err.response?.status || 500).json({
-      ok: false,
-      error: err.response?.data || { message: err.message },
-    });
-  }
-});
-
-// Batch Transfer
-app.post('/api/cashfree/batch-transfer', async (req, res) => {
-  try {
-    const { batch_transfer_id, transfers } = req.body;
-    const data = await createBatchTransfer(batch_transfer_id, transfers);
-    res.json({ ok: true, data });
-  } catch (err) {
-    res.status(err.response?.status || 500).json({
-      ok: false,
-      error: err.response?.data || err.message,
-    });
-  }
-});
-
-// Batch Status
-app.get('/api/cashfree/batch-status', async (req, res) => {
-  try {
-    const { batch_transfer_id } = req.query;
-    const data = await getBatchStatus(batch_transfer_id);
-    res.json({ ok: true, data });
-  } catch (err) {
-    res.status(err.response?.status || 500).json({
-      ok: false,
-      error: err.response?.data || err.message,
-    });
-  }
-});
-
-// Initiate Withdrawal
-app.post('/api/withdraw', async (req, res) => {
-  const { phoneNo, amount, transferId } = req.body;
-  if (!phoneNo || !amount || !transferId) {
-    return res.status(400).json({ error: "Missing phoneNo, amount, or transferId" });
-  }
-
-  // Locate user
-  const usersSnap = await db.ref('Users').once('value');
-  const users = usersSnap.val() || {};
-  const userEntry = Object.entries(users).find(([_, user]) => user.phoneNo === phoneNo);
-
-  if (!userEntry) return res.status(404).json({ error: "User not found" });
-  const [userKey, userData] = userEntry;
-
-  const currentTokens = userData.tokens || 0;
-  if (currentTokens < amount) {
-    return res.status(400).json({ error: "Insufficient tokens to withdraw" });
-  }
-
-  // Reserve tokens immediately
-  const newBalance = currentTokens - amount;
-  await db.ref(`Users/${userKey}`).update({ tokens: newBalance });
-
-  // Create pending withdrawal record
-  await db.ref(`withdrawals/${transferId}`).set({
-    phoneNo,
-    amount,
-    userKey,
-    status: "PENDING",
-    requestedAt: admin.database.ServerValue.TIMESTAMP
+      res.json({ success: true, bankingId, message: "Banking details added successfully" });
+    } catch (err) {
+      console.error("Add banking error:", err);
+      res.status(500).json({ error: "Failed to add banking details" });
+    }
   });
 
+
+ /**
+ * Edit Banking Details
+ * req.body = { phoneNo, bankingId, bankAccountNo?, ifsc?, upiId? }
+ */
+app.put('/api/banking/edit', async (req, res) => {
+  const { phoneNo, bankingId, bankAccountNo, ifsc, upiId } = req.body;
+
+  if (!phoneNo || !bankingId) {
+    return res.status(400).json({ error: "Missing phoneNo or bankingId" });
+  }
+
   try {
-    // Initiate Cashfree transfer
-    const cfResponse = await createTransfer({
-      transfer_id: transferId,
-      transfer_amount: amount,
-      beneficiary_details: { beneficiary_id: userData.beneficiaryId }
-    });
-    res.json({ success: true, data: cfResponse });
+    const usersSnap = await db.ref("Users").once("value");
+    const users = usersSnap.val();
+
+    let userKey = null;
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const bankingRef = db.ref(`Users/${userKey}/bankingDetails/${bankingId}`);
+    const bankingSnap = await bankingRef.once("value");
+
+    if (!bankingSnap.exists()) {
+      return res.status(404).json({ error: "Banking record not found" });
+    }
+
+    const updates = {};
+    if (bankAccountNo) updates.bankAccountNo = bankAccountNo;
+    if (ifsc) updates.ifsc = ifsc;
+    if (upiId) updates.upiId = upiId;
+
+    // ✅ Flagging as unverified
+    updates.status = "unverified";
+    updates.updatedAt = admin.database.ServerValue.TIMESTAMP;
+
+    await bankingRef.update(updates);
+
+    res.json({ success: true, message: "Banking details updated and marked as unverified" });
   } catch (err) {
-    // Refund on error
-    await db.ref(`Users/${userKey}`).update({ tokens: currentTokens });
-    await db.ref(`withdrawals/${transferId}`).update({ status: 'FAILED', failedAt: admin.database.ServerValue.TIMESTAMP });
-    res.status(500).json({ success: false, error: err.response?.data || err.message });
+    console.error("Edit banking error:", err);
+    res.status(500).json({ error: "Failed to edit banking details" });
   }
 });
 
-//
-// ---------- Webhook ----------
-//
-app.post('/webhook/cashfree', express.raw({ type: 'application/json' }), async (req, res) => {
-  const signature = req.headers['x-cf-signature'];
-  const timestamp = req.headers['x-cf-timestamp'];
-  const rawBody = req.body;
-  const bodyJson = JSON.parse(rawBody.toString());
 
-  const withdrawal = await db.ref(`withdrawals/${bodyJson.data.transfer_id}`).once('value');
-  if (!withdrawal.exists()) {
-    return res.sendStatus(200);
+  app.delete('/api/banking/delete', async (req, res) => {
+    const { phoneNo, bankingId } = req.body;
+
+    if (!phoneNo || !bankingId) {
+      return res.status(400).json({ error: "Missing phoneNo or bankingId" });
+    }
+
+    try {
+      const usersSnap = await db.ref("Users").once("value");
+      const users = usersSnap.val();
+
+      let userKey = null;
+      for (const [key, user] of Object.entries(users || {})) {
+        if (user.phoneNo === phoneNo) {
+          userKey = key;
+          break;
+        }
+      }
+
+      if (!userKey) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const bankingRef = db.ref(`Users/${userKey}/bankingDetails/${bankingId}`);
+      const bankingSnap = await bankingRef.once("value");
+
+      if (!bankingSnap.exists()) {
+        return res.status(404).json({ error: "Banking record not found" });
+      }
+
+      await bankingRef.remove();
+
+      res.json({ success: true, message: "Banking details deleted successfully" });
+    } catch (err) {
+      console.error("Delete banking error:", err);
+      res.status(500).json({ error: "Failed to delete banking details" });
+    }
+  });
+
+
+  
+// API endpoint to verify banking details
+app.post('/api/verify-banking-detail', async (req, res) => {
+  const { userId, detailId, type } = req.body;
+
+  if (!userId || !detailId || !type) {
+    return res.status(400).json({ error: "Missing userId, detailId, or type" });
   }
 
-  // Signature verification
-  const computed = crypto.createHmac('sha256', process.env.CASHFREE_CLIENT_SECRET_PAYOUT)
-                         .update(timestamp + rawBody)
-                         .digest('base64');
-  if (computed !== signature) {
-    return res.status(400).send('Invalid signature');
+  try {
+    // Find user by userId (assuming userId is the Firebase key or a field)
+    const usersSnap = await db.ref("Users").once("value");
+    const users = usersSnap.val();
+
+    let userKey = null;
+    for (const [key, user] of Object.entries(users || {})) {
+      if (key === userId || user.userId === userId) {
+        userKey = key;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const bankingRef = db.ref(`Users/${userKey}/bankingDetails/${detailId}`);
+    const bankingSnap = await bankingRef.once("value");
+
+    if (!bankingSnap.exists()) {
+      return res.status(404).json({ error: "Banking record not found" });
+    }
+
+    // Update status to verified
+    const updates = {
+      status: "verified",
+      verifiedAt: admin.database.ServerValue.TIMESTAMP,
+      verifiedBy: "admin",
+      updatedAt: admin.database.ServerValue.TIMESTAMP
+    };
+
+    await bankingRef.update(updates);
+
+    res.json({ 
+      success: true, 
+      message: `${type} details verified successfully`,
+      data: {
+        userId,
+        detailId,
+        type,
+        status: "verified"
+      }
+    });
+
+  } catch (err) {
+    console.error("Banking verification error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to verify banking details",
+      message: err.message 
+    });
   }
-
-  const event = bodyJson.event;
-  const transferId = bodyJson.data.transfer_id;
-  const amount = bodyJson.data.transfer_amount;
-
-  if (event === 'TRANSFER_SUCCESS') {
-    await db.ref(`withdrawals/${transferId}`).update({ status: 'COMPLETED', completedAt: admin.database.ServerValue.TIMESTAMP });
-  } else if (['TRANSFER_FAILED', 'TRANSFER_REJECTED'].includes(event)) {
-    const wd = withdrawal.val();
-    const userSnap = await db.ref(`Users/${wd.userKey}`).once('value');
-    const user = userSnap.val();
-    const refundBalance = (user.tokens || 0) + amount;
-    await db.ref(`Users/${wd.userKey}`).update({ tokens: refundBalance });
-    await db.ref(`withdrawals/${transferId}`).update({ status: 'FAILED', failedAt: admin.database.ServerValue.TIMESTAMP });
-  }
-
-  res.sendStatus(200);
 });
 
 //Server
