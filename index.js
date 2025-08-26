@@ -4897,6 +4897,160 @@ app.post('/api/verify-banking-detail', async (req, res) => {
   }
 });
 
+
+
+//Withdraw apis
+app.post("/api/request-withdrawal", async (req, res) => {
+  try {
+    const { phoneNo, tokens, method } = req.body;
+
+    if (!phoneNo || !tokens || !method) {
+      return res.status(400).json({ error: "phoneNo, tokens, and method are required" });
+    }
+
+    // 🔹 Find user by phoneNo
+    const usersSnap = await db.ref("Users").once("value");
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const currentTokens = userData.tokens || 0;
+
+    if (tokens > currentTokens) {
+      return res.status(400).json({ error: "Insufficient tokens" });
+    }
+
+    // 🔹 Calculate tax (30%) and final withdrawal
+    const tax = Math.floor(tokens * 0.3);
+    const amountAfterTax = tokens - tax;
+
+    // 🔹 Deduct tokens from user balance
+    await db.ref(`Users/${userKey}`).update({
+      tokens: currentTokens - tokens,
+    });
+
+    // 🔹 Find selected banking/upi details
+    let selectedMethodDetails = null;
+
+    if (userData.bankingDetails) {
+      for (const [id, detail] of Object.entries(userData.bankingDetails)) {
+        const isBank =
+          detail.bankAccountNo && method.includes(detail.bankAccountNo);
+        const isUpi = detail.upiId && method.includes(detail.upiId);
+
+        if (isBank || isUpi) {
+          selectedMethodDetails = {
+            bankAccountNo: detail.bankAccountNo || null,
+            ifsc: detail.ifsc || null,
+            upiId: detail.upiId || null,
+            status: detail.status || "unverified",
+          };
+          break;
+        }
+      }
+    }
+
+    // 🔹 Create withdrawal request inside user node
+    const withdrawalsRef = db.ref(`Users/${userKey}/withdrawals`);
+    const withdrawalId = withdrawalsRef.push().key;
+
+    const withdrawalData = {
+      requestedTokens: tokens,
+      tax: tax,
+      finalTokens: amountAfterTax,
+      method: selectedMethodDetails || { raw: method }, // full bank/upi info
+      status: "pending", // admin updates later
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+    };
+
+    await withdrawalsRef.child(withdrawalId).set(withdrawalData);
+
+    res.json({
+      success: true,
+      message: "Withdrawal request submitted successfully",
+      withdrawalId,
+      withdrawal: withdrawalData,
+    });
+  } catch (error) {
+    console.error("Error requesting withdrawal:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+//Admin 
+app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
+  try {
+    const { userId, withdrawalId } = req.params;
+    const { status } = req.body; // expected: "approved" or "rejected"
+
+    if (!status || !["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ success: false, error: "Invalid status" });
+    }
+
+    const withdrawalRef = db.ref(`Users/${userId}/withdrawals/${withdrawalId}`);
+    const withdrawalSnap = await withdrawalRef.once("value");
+
+    if (!withdrawalSnap.exists()) {
+      return res.status(404).json({ success: false, error: "Withdrawal not found" });
+    }
+
+    const withdrawal = withdrawalSnap.val();
+
+    if (withdrawal.status !== "pending") {
+      return res.status(400).json({ success: false, error: "Already processed" });
+    }
+
+    // ✅ If rejected, refund tokens to user
+    if (status === "rejected") {
+      const userRef = db.ref(`Users/${userId}`);
+      const userSnap = await userRef.once("value");
+
+      if (!userSnap.exists()) {
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
+
+      const userData = userSnap.val();
+      const currentTokens = userData.tokens || 0;
+      const refundTokens = withdrawal.requestedTokens || 0;
+
+      await userRef.update({
+        tokens: currentTokens + refundTokens,
+      });
+    }
+
+    // ✅ Update withdrawal status
+    await withdrawalRef.update({
+      status: status,
+      updatedAt: admin.database.ServerValue.TIMESTAMP,
+    });
+
+    return res.json({
+      success: true,
+      message: `Withdrawal ${status} successfully`,
+      withdrawalId,
+      status,
+    });
+  } catch (error) {
+    console.error("Error updating withdrawal:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+
+
 //Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
