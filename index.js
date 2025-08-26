@@ -5049,6 +5049,72 @@ app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
   }
 });
 
+app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
+    try {
+        const { phoneNo } = req.params;
+        console.log(`\nFetching user data for phone number: ${phoneNo}`);
+
+        // Reference to the Users node
+        const usersRef = admin.database().ref('Users');
+
+        // Fetch data once
+        const snapshot = await usersRef.once('value');
+        const users = snapshot.val();
+        let userData = null;
+        let foundUserId = null;
+
+        // Search for user with matching phone number
+        for (const userKey in users) {
+            if (users[userKey].phoneNo === phoneNo) {
+                userData = {
+                    ...users[userKey],
+                    userId: userKey
+                };
+                foundUserId = userKey;
+                break;
+            }
+        }
+
+        if (userData) {
+            console.log('\nUser Details Found:');
+            console.log('User ID:', foundUserId);
+
+            for (const [key, value] of Object.entries(userData)) {
+                if (key === 'userids') {
+                    console.log('User IDs:');
+                    console.log('- Referral ID:', value.myrefrelid);
+                    console.log('- User ID:', value.myuserid);
+                } else if (typeof value !== 'object') {
+                    console.log(`${key}:`, value);
+                } else if (value !== null) {
+                    console.log(`${key}:`, JSON.stringify(value, null, 2));
+                }
+            }
+            console.log('\n');
+
+            // Return JSON response instead of SSE
+            res.json({
+                success: true,
+                tokens: userData.tokens || 0,
+                userData: userData
+            });
+        } else {
+            console.log('User not found for phone number:', phoneNo);
+            res.json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching user data'
+        });
+    }
+});
+
+
 
 
 //Server
