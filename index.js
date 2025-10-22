@@ -1135,241 +1135,234 @@ app.post('/api/store-bet-numbers', async (req, res) => {
 
 
 //game result generation function and apis
+//game result generation function and apis
 class SecurePayoutGenerator {
-    constructor(secretKey) {
-        this.secretKey = secretKey;
-        this.results = {};
-    }
+  constructor(secretKey) {
+    this.secretKey = secretKey;
+    this.results = {};
+  }
 
-    isValidPanna(panna) {
-        const pannaStr = panna.toString().padStart(3, '0');
-        return [...pannaStr].every((digit, i) =>
-            i === 0 ? digit !== '0' : digit >= pannaStr[i - 1]
-        );
-    }
+  isValidPanna(panna) {
+    const pannaStr = panna.toString().padStart(3, '0');
+    return [...pannaStr].every((digit, i) =>
+      i === 0 ? digit !== '0' : digit >= pannaStr[i - 1]
+    );
+  }
 
-    calculateNumberFromPanna(panna) {
-        return [...panna.toString().padStart(3, '0')]
-            .reduce((sum, digit) => sum + parseInt(digit), 0) % 10;
-    }
+  calculateNumberFromPanna(panna) {
+    return [...panna.toString().padStart(3, '0')]
+      .reduce((sum, digit) => sum + parseInt(digit), 0) % 10;
+  }
 
-    generateSecureRandom() {
-        const array = new Uint32Array(1);
-        crypto.getRandomValues(array);
-        return array[0];
-    }
+  generateSecureRandom() {
+    return crypto.randomBytes(4).readUInt32BE(0);
+  }
 
-    _formatBetsData(firebaseBets) {
-        return {
-            openPanna: firebaseBets?.['open-pana'] || {},
-            closePanna: firebaseBets?.['close-pana'] || {},
-            openNumber: firebaseBets?.['open-number'] || {},
-            closeNumber: firebaseBets?.['close-number'] || {},
-            openClose: firebaseBets?.['open-close'] || {}
-        };
-    }
+  // 🔹 UPDATED — replaced old names with your new Firebase keys
+  _formatBetsData(firebaseBets) {
+    return {
+      openPanna: firebaseBets?.['3-fruits-start'] || {},
+      closePanna: firebaseBets?.['3-fruits-end'] || {},
+      openNumber: firebaseBets?.['1-fruits-start'] || {},
+      closeNumber: firebaseBets?.['1-fruits-end'] || {},
+      openClose: firebaseBets?.['2-fruits'] || {}
+    };
+  }
 
-    calculatePayout(category, result, bets, multipliers) {
-        const betAmount = bets[category]?.[result] || 0;
-        return betAmount * multipliers[category];
-    }
+  calculatePayout(category, result, bets, multipliers) {
+    const betAmount = bets[category]?.[result] || 0;
+    return betAmount * multipliers[category];
+  }
 
-    async processOpenResults(firebaseBets, multipliers) {
-        const bets = this._formatBetsData(firebaseBets);
-        const validPannas = [...Array(1000).keys()]
-            .filter(num => this.isValidPanna(num))
-            .map(num => num.toString().padStart(3, '0'));
+  async processOpenResults(firebaseBets, multipliers) {
+    const bets = this._formatBetsData(firebaseBets);
+    const validPannas = [...Array(1000).keys()]
+      .filter(num => this.isValidPanna(num))
+      .map(num => num.toString().padStart(3, '0'));
 
-        if (Object.keys(bets.openPanna).length === 0 && Object.keys(bets.openNumber).length === 0) {
-            const randomIndex = this.generateSecureRandom() % validPannas.length;
-            const randomPanna = validPannas[randomIndex];
-            const randomNumber = this.calculateNumberFromPanna(randomPanna);
+    if (Object.keys(bets.openPanna).length === 0 && Object.keys(bets.openNumber).length === 0) {
+      const randomIndex = this.generateSecureRandom() % validPannas.length;
+      const randomPanna = validPannas[randomIndex];
+      const randomNumber = this.calculateNumberFromPanna(randomPanna);
 
-            return {
-                openPanna: randomPanna,
-                openNumber: randomNumber,
-                totalOpenPayout: 0,
-                details: {
-                    openPannaPayout: 0,
-                    openNumberPayout: 0
-                }
-            };
+      return {
+        openPanna: randomPanna,
+        openNumber: randomNumber,
+        totalOpenPayout: 0,
+        details: {
+          openPannaPayout: 0,
+          openNumberPayout: 0
         }
-
-        const openResults = validPannas.map(openPanna => {
-            const openNumber = this.calculateNumberFromPanna(openPanna);
-            const payoutOpenPanna = this.calculatePayout('openPanna', openPanna, bets, multipliers);
-            const payoutOpenNumber = this.calculatePayout('openNumber', openNumber, bets, multipliers);
-            const totalOpenPayout = payoutOpenPanna + payoutOpenNumber;
-
-            return {
-                openPanna,
-                openNumber,
-                totalOpenPayout,
-                details: {
-                    openPannaPayout: payoutOpenPanna,
-                    openNumberPayout: payoutOpenNumber
-                }
-            };
-        });
-
-        const minPayout = Math.min(...openResults.map(r => r.totalOpenPayout));
-        const minPayoutResults = openResults.filter(r => r.totalOpenPayout === minPayout);
-        const randomIndex = this.generateSecureRandom() % minPayoutResults.length;
-        return minPayoutResults[randomIndex];
+      };
     }
 
-    async processCloseResults(firebaseBets, multipliers, openResults) {
-        if (!openResults || !openResults["open-number"] || !openResults["open-pana"]) {
-            throw new Error("Open results are required for close processing");
+    const openResults = validPannas.map(openPanna => {
+      const openNumber = this.calculateNumberFromPanna(openPanna);
+      const payoutOpenPanna = this.calculatePayout('openPanna', openPanna, bets, multipliers);
+      const payoutOpenNumber = this.calculatePayout('openNumber', openNumber, bets, multipliers);
+      const totalOpenPayout = payoutOpenPanna + payoutOpenNumber;
+
+      return {
+        openPanna,
+        openNumber,
+        totalOpenPayout,
+        details: {
+          openPannaPayout: payoutOpenPanna,
+          openNumberPayout: payoutOpenNumber
         }
+      };
+    });
 
-        const bets = this._formatBetsData(firebaseBets);
-        const validPannas = [...Array(1000).keys()]
-            .filter(num => this.isValidPanna(num))
-            .map(num => num.toString().padStart(3, '0'));
+    const minPayout = Math.min(...openResults.map(r => r.totalOpenPayout));
+    const minPayoutResults = openResults.filter(r => r.totalOpenPayout === minPayout);
+    const randomIndex = this.generateSecureRandom() % minPayoutResults.length;
+    return minPayoutResults[randomIndex];
+  }
 
-        if (Object.keys(bets.closePanna).length === 0 &&
-            Object.keys(bets.closeNumber).length === 0 &&
-            Object.keys(bets.openClose).length === 0) {
-            const randomIndex = this.generateSecureRandom() % validPannas.length;
-            const randomPanna = validPannas[randomIndex];
-            const randomNumber = this.calculateNumberFromPanna(randomPanna);
-
-            return {
-                closePanna: randomPanna,
-                closeNumber: randomNumber,
-                openClose: `${openResults["open-number"]}${randomNumber}`,
-                totalClosePayout: 0,
-                details: {
-                    closePannaPayout: 0,
-                    closeNumberPayout: 0,
-                    openClosePayout: 0
-                }
-            };
-        }
-
-        const closeResults = validPannas.map(closePanna => {
-            const closeNumber = this.calculateNumberFromPanna(closePanna);
-            const openClose = `${openResults["open-number"]}${closeNumber}`;
-            const payoutClosePanna = this.calculatePayout('closePanna', closePanna, bets, multipliers);
-            const payoutCloseNumber = this.calculatePayout('closeNumber', closeNumber, bets, multipliers);
-            const payoutOpenClose = this.calculatePayout('openClose', openClose, bets, multipliers);
-            const totalClosePayout = payoutClosePanna + payoutCloseNumber + payoutOpenClose;
-
-            return {
-                closePanna,
-                closeNumber,
-                openClose,
-                totalClosePayout,
-                details: {
-                    closePannaPayout: payoutClosePanna,
-                    closeNumberPayout: payoutCloseNumber,
-                    openClosePayout: payoutOpenClose
-                }
-            };
-        });
-
-        const minClosePayout = Math.min(...closeResults.map(r => r.totalClosePayout));
-        const minClosePayoutResults = closeResults.filter(r => r.totalClosePayout === minClosePayout);
-        const randomIndex = this.generateSecureRandom() % minClosePayoutResults.length;
-        return minClosePayoutResults[randomIndex];
+  async processCloseResults(firebaseBets, multipliers, openResults) {
+    if (!openResults || !openResults["open-number"] || !openResults["open-pana"]) {
+      throw new Error("Open results are required for close processing");
     }
+
+    const bets = this._formatBetsData(firebaseBets);
+    const validPannas = [...Array(1000).keys()]
+      .filter(num => this.isValidPanna(num))
+      .map(num => num.toString().padStart(3, '0'));
+
+    if (Object.keys(bets.closePanna).length === 0 &&
+      Object.keys(bets.closeNumber).length === 0 &&
+      Object.keys(bets.openClose).length === 0) {
+      const randomIndex = this.generateSecureRandom() % validPannas.length;
+      const randomPanna = validPannas[randomIndex];
+      const randomNumber = this.calculateNumberFromPanna(randomPanna);
+
+      return {
+        closePanna: randomPanna,
+        closeNumber: randomNumber,
+        openClose: `${openResults["open-number"]}${randomNumber}`,
+        totalClosePayout: 0,
+        details: {
+          closePannaPayout: 0,
+          closeNumberPayout: 0,
+          openClosePayout: 0
+        }
+      };
+    }
+
+    const closeResults = validPannas.map(closePanna => {
+      const closeNumber = this.calculateNumberFromPanna(closePanna);
+      const openClose = `${openResults["open-number"]}${closeNumber}`;
+      const payoutClosePanna = this.calculatePayout('closePanna', closePanna, bets, multipliers);
+      const payoutCloseNumber = this.calculatePayout('closeNumber', closeNumber, bets, multipliers);
+      const payoutOpenClose = this.calculatePayout('openClose', openClose, bets, multipliers);
+      const totalClosePayout = payoutClosePanna + payoutCloseNumber + payoutOpenClose;
+
+      return {
+        closePanna,
+        closeNumber,
+        openClose,
+        totalClosePayout,
+        details: {
+          closePannaPayout: payoutClosePanna,
+          closeNumberPayout: payoutCloseNumber,
+          openClosePayout: payoutOpenClose
+        }
+      };
+    });
+
+    const minClosePayout = Math.min(...closeResults.map(r => r.totalClosePayout));
+    const minClosePayoutResults = closeResults.filter(r => r.totalClosePayout === minClosePayout);
+    const randomIndex = this.generateSecureRandom() % minClosePayoutResults.length;
+    return minClosePayoutResults[randomIndex];
+  }
 }
+
 
 async function generateAndStoreResults(sessionNumber, type) {
-    const db = admin.database();
-    const betsRef = db.ref(`/OpenCloseGameDetails/betted-numbers/${sessionNumber}`);
-    const currentDate = new Date().toISOString().split("T")[0];
-    const resultsRef = db.ref(`/Results/${currentDate}`);
+  const dbRef = admin.database();
+  const betsRef = dbRef.ref(`/OpenCloseGameDetails/betted-numbers/${sessionNumber}`);
+  const currentDate = new Date().toISOString().split("T")[0];
+  const resultsRef = dbRef.ref(`/Results/${currentDate}`);
 
-    const secureKey = "your-secure-key";
-    const multipliers = {
-        openPanna: 100,
-        closePanna: 100,
-        openNumber: 10,
-        closeNumber: 10,
-        openClose: 100
-    };
-    const generator = new SecurePayoutGenerator(secureKey);
+  const secureKey = "your-secure-key";
+  const multipliers = {
+    openPanna: 100,
+    closePanna: 100,
+    openNumber: 10,
+    closeNumber: 10,
+    openClose: 100
+  };
+  const generator = new SecurePayoutGenerator(secureKey);
 
-    try {
-        const formattedSessionNumber = sessionNumber.replace(/-/g, "");
-        const snapshot = await betsRef.once("value");
-        const firebaseBets = snapshot.val();
+  try {
+    const formattedSessionNumber = sessionNumber.replace(/-/g, "");
+    const snapshot = await betsRef.once("value");
+    const firebaseBets = snapshot.val();
 
-        let resultsToStore = {
-            timestamp: new Date().toISOString()
-        };
+    let resultsToStore = { timestamp: new Date().toISOString() };
 
-        if (type === "open") {
-            const openResults = await generator.processOpenResults(firebaseBets, multipliers);
-            resultsToStore[formattedSessionNumber] = {
-                "open-number": String(openResults.openNumber),
-                "open-pana": String(openResults.openPanna),
-                "nums": `${openResults.openPanna} ${openResults.openNumber}`,
-                "details": {
-                    openNumberPayout: openResults.details.openNumberPayout,
-                    openPannaPayout: openResults.details.openPannaPayout,
-                    totalOpenPayout: openResults.totalOpenPayout
-                }
-            };
-        } else if (type === "close") {
-            const sessionSnapshot = await resultsRef.child(formattedSessionNumber).once("value");
-            const existingResults = sessionSnapshot.val();
-
-            if (!existingResults) {
-                throw new Error(`Open results missing for ${formattedSessionNumber}`);
-            }
-
-            const closeResults = await generator.processCloseResults(firebaseBets, multipliers, existingResults);
-
-            resultsToStore[formattedSessionNumber] = {
-                ...existingResults,
-                "close-number": String(closeResults.closeNumber),
-                "close-pana": String(closeResults.closePanna),
-                "nums": `${existingResults["open-pana"]} ${existingResults["open-number"]} ${closeResults.closeNumber} ${closeResults.closePanna}`,
-                "details": {
-                    ...existingResults.details,
-                    closeNumberPayout: closeResults.details.closeNumberPayout,
-                    closePannaPayout: closeResults.details.closePannaPayout,
-                    openClosePayout: closeResults.details.openClosePayout
-                }
-            };
+    if (type === "open") {
+      const openResults = await generator.processOpenResults(firebaseBets, multipliers);
+      resultsToStore[formattedSessionNumber] = {
+        "open-number": String(openResults.openNumber),
+        "open-pana": String(openResults.openPanna),
+        "nums": `${openResults.openPanna} ${openResults.openNumber}`,
+        "details": {
+          openNumberPayout: openResults.details.openNumberPayout,
+          openPannaPayout: openResults.details.openPannaPayout,
+          totalOpenPayout: openResults.totalOpenPayout
         }
+      };
+    } else if (type === "close") {
+      const sessionSnapshot = await resultsRef.child(formattedSessionNumber).once("value");
+      const existingResults = sessionSnapshot.val();
 
-        await resultsRef.update(resultsToStore);
-        console.log(`Successfully stored ${type} results for ${sessionNumber}`);
-    } catch (error) {
-        console.error(`Error generating ${type} results for ${sessionNumber}:`, error);
-        throw error;
+      if (!existingResults) {
+        throw new Error(`Open results missing for ${formattedSessionNumber}`);
+      }
+
+      const closeResults = await generator.processCloseResults(firebaseBets, multipliers, existingResults);
+      resultsToStore[formattedSessionNumber] = {
+        ...existingResults,
+        "close-number": String(closeResults.closeNumber),
+        "close-pana": String(closeResults.closePanna),
+        "nums": `${existingResults["open-pana"]} ${existingResults["open-number"]} ${closeResults.closeNumber} ${closeResults.closePanna}`,
+        "details": {
+          ...existingResults.details,
+          closeNumberPayout: closeResults.details.closeNumberPayout,
+          closePannaPayout: closeResults.details.closePannaPayout,
+          openClosePayout: closeResults.details.openClosePayout
+        }
+      };
     }
+
+    await resultsRef.update(resultsToStore);
+    console.log(`✅ Successfully stored ${type} results for ${sessionNumber}`);
+  } catch (error) {
+    console.error(`❌ Error generating ${type} results for ${sessionNumber}:`, error);
+  }
 }
 
-
+// 🕒 Schedule Times
 function scheduleResultGeneration() {
-    const scheduleTimes = [
-        { time: "14:30", session: "session-1", type: "open" },
-        { time: "17:30", session: "session-1", type: "close" },
-        { time: "21:30", session: "session-2", type: "open" },
-        { time: "23:50", session: "session-2", type: "close" }
-    ];
+  const scheduleTimes = [
+    { time: "11:19", session: "session-1", type: "open" },
+    { time: "11:20", session: "session-1", type: "close" },
+    { time: "11:20", session: "session-2", type: "open" },
+    { time: "11:21", session: "session-2", type: "close" }
+  ];
 
-    scheduleTimes.forEach(({ time, session, type }) => {
-        const [hours, minutes] = time.split(":").map(Number);
+  scheduleTimes.forEach(({ time, session, type }) => {
+    const [hours, minutes] = time.split(":").map(Number);
 
-        schedule.scheduleJob(`${minutes} ${hours} * * *`, () => {
-            generateAndStoreResults(session, type)
-                .then(() => {
-                    console.log(`Scheduled ${type} result generation completed for ${session} at ${time}`);
-                })
-                .catch(error => {
-                    console.error(`Error in scheduled ${type} result generation for ${session}:`, error);
-                });
-        });
-
-        console.log(`Scheduled ${type} generation for ${session} at ${time} daily`);
+    schedule.scheduleJob(`${minutes} ${hours} * * *`, () => {
+      generateAndStoreResults(session, type)
+        .then(() => console.log(`🕒 Scheduled ${type} result done for ${session} at ${time}`))
+        .catch(err => console.error(`Error in scheduled ${type} for ${session}:`, err));
     });
+
+    console.log(`📅 Scheduled ${type} generation for ${session} at ${time} daily`);
+  });
 }
 
 scheduleResultGeneration();
@@ -1655,202 +1648,181 @@ app.get('/api/fetch-results', async (req, res) => {
 });
 
 
+// MATCH RESULTS DEBUG API — session-aware, detailed logs
+// MATCH RESULTS API — session-aware with winners collection
+app.post('/api/match-results/new', async (req, res) => {
+  try {
+    const dbRef = firebaseAdmin.database();
+    const resultsRef = dbRef.ref('/Results');
+    const usersRef = dbRef.ref('/Users');
+    const winnersRef = dbRef.ref('/Winners');
 
+    const now = moment().tz('Asia/Kolkata');
+    const today = now.format('YYYY-MM-DD');
 
+    console.log(`🕒 Starting match-results API for date ${today}`);
 
-//Winners section
-// API to match results and create winners in Firebase Realtime Database
-app.post('/api/match-results', async (req, res) => {
-    try {
-        const dbRef = firebaseAdmin.database();
-        const resultsRef = dbRef.ref('/Results');
-        const usersRef = dbRef.ref('/Users');
-        const winnersRef = dbRef.ref('/Winners');
-        const processedDatesRef = dbRef.ref('/ProcessedDates');
+    // Get today's results
+    const resultsSnapshot = await resultsRef.child(today).once('value');
+    const todayResults = resultsSnapshot.val();
 
-        const now = moment().tz('Asia/Kolkata');
-        const today = now.format('YYYY-MM-DD');
-
-        // ✅ Check if today's results were already processed
-        const alreadyProcessedSnapshot = await processedDatesRef.child(today).once('value');
-        if (alreadyProcessedSnapshot.exists()) {
-            return res.status(400).json({
-                success: false,
-                message: `Results for ${today} have already been processed`,
-            });
-        }
-
-        // ✅ Get today's results
-        const resultsSnapshot = await resultsRef.child(today).once('value');
-        const todayResults = resultsSnapshot.val();
-
-        if (!todayResults) {
-            return res.status(404).json({
-                success: false,
-                message: 'No results found for today',
-            });
-        }
-
-        // ✅ Get all users
-        const usersSnapshot = await usersRef.once('value');
-        const usersData = usersSnapshot.val();
-
-        if (!usersData) {
-            return res.status(404).json({
-                success: false,
-                message: 'No users found',
-            });
-        }
-
-        const allWinners = {};
-
-        // 🔁 Loop through each session result
-        for (const [session, sessionResults] of Object.entries(todayResults)) {
-            const sessionWinners = [];
-
-            for (const [userId, userData] of Object.entries(usersData)) {
-                const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
-                const gamesSnapshot = await userGamesRef.once('value');
-                const gamesData = gamesSnapshot.val();
-
-                if (!gamesData) continue;
-
-                for (const [gameId, gameData] of Object.entries(gamesData)) {
-                    // ✅ Skip if already processed
-                    if (gameData.processed) continue;
-
-                    // ✅ Ensure bet is from today
-                    const betTimestamp = gameData.timestamp
-                        ? moment(gameData.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
-                        : null;
-
-                    if (betTimestamp !== today) continue;
-
-                    // ✅ Skip if this gameId already has a winner entry
-                    const existingWinnerSnap = await winnersRef
-                        .orderByChild('gameId')
-                        .equalTo(gameId)
-                        .once('value');
-                    
-                    if (existingWinnerSnap.exists()) continue;
-
-                    // ✅ Check win condition
-                    const winnerEntry = checkWinCondition(
-                        session,
-                        sessionResults,
-                        gameData,
-                        userId,
-                        userData,
-                        gameId,
-                        today
-                    );
-
-                    if (winnerEntry) {
-                        // Save winner
-                        const newWinnerRef = winnersRef.push();
-                        await newWinnerRef.set(winnerEntry);
-
-                        // Update tokens
-                        const userTokensRef = usersRef.child(`${userId}/tokens`);
-                        await userTokensRef.transaction((currentTokens) => {
-                            return (currentTokens || 0) + winnerEntry.amountWon;
-                        });
-
-                        // ✅ Mark game as processed
-                        await userGamesRef.child(`${gameId}/processed`).set(true);
-
-                        sessionWinners.push(winnerEntry);
-                    }
-                }
-            }
-
-            allWinners[session] = sessionWinners;
-        }
-
-        // ✅ Mark date as processed
-        await processedDatesRef.child(today).set(true);
-
-        res.status(200).json({
-            success: true,
-            message: 'Results matched and winners calculated',
-            winners: allWinners,
-            totalWinnersCount: Object.values(allWinners).reduce(
-                (sum, session) => sum + session.length,
-                0
-            ),
-        });
-
-    } catch (error) {
-        console.error('Error in result matching:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to match results and calculate winners',
-            error: error.message,
-        });
+    if (!todayResults) {
+      console.log(`❌ No results found for today`);
+      return res.status(404).json({ success: false, message: 'No results found for today' });
     }
+
+    console.log("📊 Today's results:", JSON.stringify(todayResults, null, 2));
+
+    // Get all users
+    const usersSnapshot = await usersRef.once('value');
+    const usersData = usersSnapshot.val();
+
+    if (!usersData) {
+      console.log(`❌ No users found`);
+      return res.status(404).json({ success: false, message: 'No users found' });
+    }
+
+    // Map gameMode to result key
+    const gameModeToResultKey = {
+      "1-fruits-start": "open-number",
+      "1-fruits-end": "close-number",
+      "2-fruits": "open-close",
+      "3-fruits-start": "open-pana",
+      "3-fruits-end": "close-pana"
+    };
+
+    // Map gameMode to winType
+    const gameModeToWinType = {
+      "1-fruits-start": "Single Digit Open",
+      "1-fruits-end": "Single Digit Close",
+      "2-fruits": "Jodi",
+      "3-fruits-start": "Single Pana Open",
+      "3-fruits-end": "Single Pana Close"
+    };
+
+    let totalWinners = 0;
+    let totalAmountWon = 0;
+
+    // Loop through all users
+    for (const [userId, userData] of Object.entries(usersData)) {
+      const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
+      const gamesSnapshot = await userGamesRef.once('value');
+      const gamesData = gamesSnapshot.val();
+      if (!gamesData) continue;
+
+      for (const [gameId, gameData] of Object.entries(gamesData)) {
+        console.log(`\n➡️ Checking User ${userId}, gameId ${gameId}`);
+        console.log("Game Data:", gameData);
+
+        // Skip if not today's bet
+        const betDate = gameData.timestamp
+          ? moment(gameData.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
+          : null;
+        if (betDate != today) {
+          console.log(`❌ Skipped: Different date (${betDate})`);
+          continue;
+        }
+
+        // Match session from user's sessionNumber
+        const sessionKey = `session${gameData.sessionNumber}`;
+        const sessionResults = todayResults[sessionKey];
+        if (!sessionResults) {
+          console.log(`❌ Skipped: No results for user's session ${sessionKey}`);
+          continue;
+        }
+
+        // Get result key and value
+        const resultKey = gameModeToResultKey[gameData.gameMode];
+        if (!resultKey) {
+          console.log(`❌ Skipped: Unknown gameMode ${gameData.gameMode}`);
+          continue;
+        }
+
+        const resultValue = sessionResults[resultKey];
+        if (!resultValue) {
+          console.log(`❌ Skipped: No result value for key ${resultKey}`);
+          continue;
+        }
+
+        // Compare user's selected numbers with result
+        const selectedStr = gameData.selectedNumbers.join(""); // user's selection
+        const resultStr = resultValue.toString();             // result as string
+        let isWin = selectedStr == resultStr;                // use == to ignore type
+
+        if (isWin) {
+          const betAmount = parseFloat(gameData.betAmount) || 0;
+          let amountWon = 0;
+
+          if (
+            gameData.gameMode === "1-fruits-start" ||
+            gameData.gameMode === "1-fruits-end" ||
+            gameData.gameMode === "3-fruits-start" ||
+            gameData.gameMode === "3-fruits-end"
+          ) {
+            amountWon = betAmount * 10;
+          } else if (gameData.gameMode === "2-fruits") {
+            amountWon = betAmount * 100;
+          }
+
+          const winnerData = {
+            userId: userId,
+            phoneNo: userData.phone || userData.phoneNo || 'N/A',
+            gameId: gameId,
+            betAmount: betAmount,
+            amountWon: amountWon,
+            winType: gameModeToWinType[gameData.gameMode] || gameData.gameMode,
+            date: today,
+            session: sessionKey,
+            selectedNumbers: selectedStr,
+            resultNumbers: resultStr,
+            timestamp: moment().tz('Asia/Kolkata').valueOf()
+          };
+
+          // Save to Winners
+          await winnersRef.child(today).child(sessionKey).child(userId).child(gameId).set(winnerData);
+
+          // Update user's tokens
+          const currentTokens = parseFloat(userData.tokens || 0);
+          await usersRef.child(userId).update({
+            tokens: currentTokens + amountWon
+          });
+
+          totalWinners++;
+          totalAmountWon += amountWon;
+
+          console.log(`✅ WINNER! User ${userId}, gameId ${gameId} won ${amountWon}. Updated tokens: ${currentTokens + amountWon}`);
+        } else {
+          console.log(`❌ User ${userId}, gameId ${gameId} did NOT win. Selection: ${selectedStr}, Result: ${resultStr}`);
+        }
+      }
+    }
+
+    console.log(`\n🎉 Match results completed! Total winners: ${totalWinners}, Total amount won: ${totalAmountWon}`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Match results completed successfully',
+      summary: {
+        date: today,
+        totalWinners: totalWinners,
+        totalAmountWon: totalAmountWon
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in result matching:', error);
+    res.status(500).json({ success: false, message: 'Failed to match results', error: error.message });
+  }
 });
 
-// Helper Function: Check Winning Conditions (unchanged)
-function checkWinCondition(session, sessionResults, gameData, userId, userData, gameId, today) {
-    const gameMode = gameData.gameMode;
-    const betAmount = gameData.betAmount;
-    const selectedNumbers = gameData.selectedNumbers;
 
-    let amountWon = 0;
-
-    if (gameMode === "open-number" && session === "session1") {
-        if (selectedNumbers.includes(parseInt(sessionResults["open-number"]))) {
-            amountWon = betAmount * 10;
-            return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openNumber", today, session);
-        }
-    } else if (gameMode === "close-number" && session === "session2") {
-        if (selectedNumbers.includes(parseInt(sessionResults["close-number"]))) {
-            amountWon = betAmount * 10;
-            return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "closeNumber", today, session);
-        }
-    } else if (gameMode === "open-pana" && session === "session1") {
-        if (selectedNumbers.join("") === sessionResults["open-pana"]) {
-            amountWon = betAmount * 100;
-            return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openPana", today, session);
-        }
-    } else if (gameMode === "close-pana" && session === "session2") {
-        if (selectedNumbers.join("") === sessionResults["close-pana"]) {
-            amountWon = betAmount * 100;
-            return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "closePana", today, session);
-        }
-    } else if (gameMode === "open-close") {
-        const openCloseResult = `${sessionResults["open-number"]}${sessionResults["close-number"]}`;
-        const userSelection = selectedNumbers.join("");
-        if (userSelection === openCloseResult) {
-            amountWon = betAmount * 100;
-            return createWinnerEntry(userId, userData.phoneNo, gameId, betAmount, amountWon, "openClose", today, session);
-        }
-    }
-
-    return null;
-}
-
-// Helper: Create Winner Entry
-function createWinnerEntry(userId, phoneNo, gameId, betAmount, amountWon, winType, date, session) {
-    return {
-        userId,
-        phoneNo,
-        gameId,
-        betAmount,
-        amountWon,
-        winType,
-        date,
-        session,
-    };
-}
-
-cron.schedule('55 23 * * *', async () => {
+cron.schedule('10 13 * * *', async () => {
     try {
         const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
 
         console.log('Starting the match-results API call at 11:55 PM');
 
-        const response = await axios.post(`${API_BASE_URL}/api/match-results`);
+        const response = await axios.post(`${API_BASE_URL}/api/match-results/new`);
 
         console.log('Match-results API called successfully:', response.data);
     } catch (error) {
@@ -1862,6 +1834,9 @@ cron.schedule('55 23 * * *', async () => {
 }, {
     timezone: 'Asia/Kolkata'
 });
+
+
+
 //update game status token updated
 app.post('/api/update-game-status', async (req, res) => {
     try {
@@ -1941,25 +1916,7 @@ app.post('/api/update-game-status', async (req, res) => {
     }
 });
 
-cron.schedule('57 23 * * *', async () => {
-    try {
-        const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
-
-        console.log('Running /update-game-status cron job at 11:57 PM');
-
-        const response = await axios.post(`${API_BASE_URL}/api/update-game-status`);
-
-        console.log('Game status update result:', response.data);
-    } catch (error) {
-        console.error(
-            'Error running /update-game-status cron job:',
-            error.response ? error.response.data : error.message
-        );
-    }
-}, {
-    timezone: 'Asia/Kolkata'
-});
-cron.schedule('57 23 * * *', async () => {
+cron.schedule('11 13 * * *', async () => {
     try {
         const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
 
@@ -2058,7 +2015,7 @@ app.post('/api/add-winner-to-wins', async (req, res) => {
     }
 });
 
-cron.schedule('57 23 * * *', async () => {
+cron.schedule('12 13 * * *', async () => {
     try {
         const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
 
@@ -4598,9 +4555,6 @@ app.post('/api/pay-entry-fee', async (req, res) => {
   }
 });
 
-
-
-
 app.post('/api/add-tokens', async (req, res) => {
   const { phoneNo, orderId, amount } = req.body;
 
@@ -4691,6 +4645,609 @@ app.post('/api/add-tokens', async (req, res) => {
 
 
 
+
+
+//Apis for entry fees and add tokens manual
+
+// API endpoint to submit order ID and create entry fee request
+app.post('/api/submit-order-id', async (req, res) => {
+  const { phoneNo, orderId, amount } = req.body;
+
+  if (!phoneNo || !orderId || !amount) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing phoneNo, orderId, or amount" 
+    });
+  }
+
+  try {
+    // Find user by phone number
+    const usersSnap = await db.ref('Users').once('value');
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "User not found" 
+      });
+    }
+
+    // Check if already submitted or paid
+    if (userData.entryFee === 'paid') {
+      return res.json({ 
+        success: false, 
+        error: "Entry fee already paid and verified" 
+      });
+    }
+
+    if (userData.entryFee === 'pending') {
+      return res.json({ 
+        success: false, 
+        error: "Entry fee verification already pending" 
+      });
+    }
+
+    // Create entry fee request in subcollection
+    const requestData = {
+      phoneNo,
+      orderId,
+      amount,
+      userKey,
+      userName: userData.name || 'N/A',
+      userEmail: userData.email || 'N/A',
+      status: 'pending', // pending, approved, rejected
+      submittedAt: admin.database.ServerValue.TIMESTAMP,
+      submittedDate: new Date().toISOString()
+    };
+
+    // Store in entryFeesRequest subcollection
+    await db.ref(`entryFeesRequest/${orderId}`).set(requestData);
+
+    // Update user's entryFee status to pending
+    await db.ref(`Users/${userKey}`).update({
+      entryFee: 'pending',
+      entryFeeOrderId: orderId,
+      entryFeeAmount: amount,
+      entryFeeSubmittedAt: admin.database.ServerValue.TIMESTAMP
+    });
+
+    res.json({
+      success: true,
+      message: "Order ID submitted successfully. Admin will verify your payment soon."
+    });
+
+  } catch (err) {
+    console.error("Submit Order ID Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to submit order ID. Please try again." 
+    });
+  }
+});
+
+// API endpoint to check entry fee status
+app.post('/api/check-entry-fee', async (req, res) => {
+  const { phoneNo } = req.body;
+
+  if (!phoneNo) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing phoneNo" 
+    });
+  }
+
+  try {
+    const usersSnap = await db.ref('Users').once('value');
+    const users = usersSnap.val();
+
+    let userData = null;
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userData) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "User not found" 
+      });
+    }
+
+    // Check entry fee status
+    const entryFeeStatus = userData.entryFee || 'unpaid';
+
+    res.json({
+      success: true,
+      entryFee: entryFeeStatus
+    });
+
+  } catch (err) {
+    console.error("Check Entry Fee Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to check entry fee status" 
+    });
+  }
+});
+
+// Admin endpoint to approve or reject entry fee request
+app.post('/api/admin/verify-entry-fee', async (req, res) => {
+  const { orderId, approved, adminNote } = req.body;
+
+  if (!orderId || approved === undefined) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing orderId or approved status" 
+    });
+  }
+
+  try {
+    // Get the request data from entryFeesRequest
+    const requestSnap = await db.ref(`entryFeesRequest/${orderId}`).once('value');
+    const requestData = requestSnap.val();
+
+    if (!requestData) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Entry fee request not found" 
+      });
+    }
+
+    const { phoneNo, amount, userKey } = requestData;
+
+    if (approved) {
+      // ===== APPROVED: Process payment with same structure as Cashfree =====
+      
+      const amountPaid = amount; // Fixed entry fee (500)
+      
+      // Calculate tax and credited amount
+      const taxAmount = +(amountPaid * 0.28).toFixed(2); // 28% tax
+      const creditedAmount = +(amountPaid - taxAmount).toFixed(2); // 72% amount
+
+      const userRef = db.ref(`Users/${userKey}`);
+
+      // ===== 1. Update User Main Data (token update removed) =====
+      await userRef.update({
+        entryFee: "paid",
+        entryFeePaidAt: admin.database.ServerValue.TIMESTAMP,
+        entryFeeOrderId: orderId,
+        entryFeeAmount: amountPaid
+      });
+
+      // ===== 2. Add to User's Orders Sub-Collection =====
+      await db.ref(`Users/${userKey}/orders/${orderId}`).set({
+        type: "entry_fee",
+        paymentDetails: {
+          method: "razorpay",
+          orderId: orderId,
+          verifiedBy: "admin"
+        },
+        amountPaid,
+        taxAmount,
+        taxRate: "28%",
+        status: "paid",
+        processedAt: admin.database.ServerValue.TIMESTAMP
+      });
+
+      // ===== 3. Update Main Orders Collection =====
+      const orderSnap = await db.ref(`orders/${orderId}`).once('value');
+      const existingOrder = orderSnap.val();
+
+      if (existingOrder) {
+        await db.ref(`orders/${orderId}`).update({
+          taxAmount,
+          creditedAmount,
+          taxRate: "28%",
+          taxDate: admin.database.ServerValue.TIMESTAMP,
+          status: "paid",
+          verifiedBy: "admin"
+        });
+      } else {
+        await db.ref(`orders/${orderId}`).set({
+          phoneNo,
+          userKey,
+          type: "entry_fee",
+          orderId,
+          amountPaid,
+          taxAmount,
+          creditedAmount,
+          taxRate: "28%",
+          status: "paid",
+          taxDate: admin.database.ServerValue.TIMESTAMP,
+          verifiedBy: "admin",
+          createdAt: admin.database.ServerValue.TIMESTAMP
+        });
+      }
+
+      // ===== 4. Update entryFeesRequest status to approved =====
+      await db.ref(`entryFeesRequest/${orderId}`).update({
+        status: 'approved',
+        approvedAt: admin.database.ServerValue.TIMESTAMP,
+        approvedDate: new Date().toISOString(),
+        adminNote: adminNote || 'Payment verified and approved',
+        taxAmount,
+        creditedAmount
+      });
+
+      res.json({
+        success: true,
+        message: "Entry fee recorded successfully with tax.",
+        amountPaid,
+        taxAmount,
+        creditedAmount
+      });
+
+    } else {
+      // ===== REJECTED =====
+      
+      await db.ref(`Users/${userKey}`).update({
+        entryFee: "unpaid",
+        entryFeeOrderId: null,
+        entryFeeAmount: null,
+        entryFeeSubmittedAt: null
+      });
+
+      await db.ref(`entryFeesRequest/${orderId}`).update({
+        status: 'rejected',
+        rejectedAt: admin.database.ServerValue.TIMESTAMP,
+        rejectedDate: new Date().toISOString(),
+        adminNote: adminNote || 'Payment verification failed'
+      });
+
+      res.json({
+        success: true,
+        message: "Entry fee request rejected"
+      });
+    }
+
+  } catch (err) {
+    console.error("Verify Entry Fee Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to verify entry fee request. Please try again." 
+    });
+  }
+});
+
+
+// API endpoint to submit token request
+app.post('/api/submit-token-request', async (req, res) => {
+  const { 
+    phoneNo, 
+    paymentId, 
+    requestedTokens, 
+    netTokens, 
+    amountPaid, 
+    gstAmount, 
+    gatewayFee 
+  } = req.body;
+
+  if (!phoneNo || !paymentId || !requestedTokens || !netTokens || !amountPaid) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing required fields" 
+    });
+  }
+
+  try {
+    // Find user by phone number
+    const usersSnap = await db.ref('Users').once('value');
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "User not found" 
+      });
+    }
+
+    // Check if this payment ID already exists
+    const existingRequestSnap = await db.ref('tokenRequests').orderByChild('paymentId').equalTo(paymentId).once('value');
+    if (existingRequestSnap.exists()) {
+      return res.json({ 
+        success: false, 
+        error: "This Payment ID has already been submitted" 
+      });
+    }
+
+    // Create token request data
+    const requestData = {
+      phoneNo,
+      paymentId,
+      requestedTokens: parseInt(requestedTokens),
+      netTokens: parseFloat(netTokens),
+      amountPaid: parseFloat(amountPaid),
+      gstAmount: parseFloat(gstAmount || 0),
+      gatewayFee: parseFloat(gatewayFee || 0),
+      userKey,
+      userName: userData.name || 'N/A',
+      userEmail: userData.email || 'N/A',
+      currentTokens: userData.tokens || 0,
+      status: 'pending', // pending, approved, rejected
+      submittedAt: admin.database.ServerValue.TIMESTAMP,
+      submittedDate: new Date().toISOString()
+    };
+
+    // Generate unique request ID
+    const requestRef = db.ref('tokenRequests').push();
+    const requestId = requestRef.key;
+
+    // Store in tokenRequests collection
+    await requestRef.set(requestData);
+
+    // Also store reference in user's token request history
+    await db.ref(`Users/${userKey}/tokenRequestHistory/${requestId}`).set({
+      paymentId,
+      requestedTokens: parseInt(requestedTokens),
+      netTokens: parseFloat(netTokens),
+      amountPaid: parseFloat(amountPaid),
+      status: 'pending',
+      submittedAt: admin.database.ServerValue.TIMESTAMP,
+      submittedDate: new Date().toISOString()
+    });
+
+    res.json({
+      success: true,
+      message: "Token request submitted successfully. Admin will verify your payment within 4-24 hours.",
+      requestId
+    });
+
+  } catch (err) {
+    console.error("Submit Token Request Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to submit token request. Please try again." 
+    });
+  }
+});
+
+// ✅ Normal Admin API to approve and process token requests
+app.post('/api/admin/update-tokens', async (req, res) => {
+  try {
+    console.log('Received request body:', req.body);
+
+    const { userId, requestId, tokensToAdd, paymentId } = req.body;
+
+    if (!userId || !requestId || !tokensToAdd || !paymentId) {
+      console.error('Missing fields:', { userId, requestId, tokensToAdd, paymentId });
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: userId, requestId, tokensToAdd, or paymentId"
+      });
+    }
+
+    // ===== 1. Fetch token request =====
+    const requestRef = db.ref(`tokenRequests/${requestId}`);
+    const requestSnap = await requestRef.once('value');
+    if (!requestSnap.exists()) {
+      return res.status(404).json({ success: false, error: "Token request not found" });
+    }
+    const requestData = requestSnap.val();
+
+    // Verify request status
+    if (requestData.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        error: `Request already ${requestData.status}`
+      });
+    }
+
+    // ===== 2. Fetch user =====
+    const userRef = db.ref(`Users/${userId}`);
+    const userSnap = await userRef.once('value');
+    if (!userSnap.exists()) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    const userData = userSnap.val();
+
+    // Check duplicate payment
+    const userOrderRef = db.ref(`Users/${userId}/orders/${paymentId}`);
+    const userOrderSnap = await userOrderRef.once('value');
+    if (userOrderSnap.exists()) {
+      return res.status(400).json({ success: false, error: "Order already processed for this user" });
+    }
+
+    // ===== 3. Compute tokens and tax =====
+    const amountPaid = parseFloat(requestData.amountPaid);
+    const taxAmount = +(amountPaid * 0.28).toFixed(2);
+    const creditedTokens = parseFloat(tokensToAdd);
+    const newTokenBalance = (userData.tokens || 0) + creditedTokens;
+
+    // ===== 4. Update user's token balance =====
+    await userRef.update({
+      tokens: newTokenBalance,
+      lastTokenAddition: {
+        amountPaid,
+        taxAmount,
+        creditedTokens,
+        taxRate: "28%",
+        orderId: paymentId,
+        requestId,
+        timestamp: admin.database.ServerValue.TIMESTAMP
+      }
+    });
+
+    // ===== 5. Save order inside user orders =====
+    await userOrderRef.set({
+      type: "tokens",
+      amountPaid,
+      taxAmount,
+      creditedTokens,
+      taxRate: "28%",
+      requestedTokens: requestData.requestedTokens,
+      netTokens: requestData.netTokens,
+      gstAmount: requestData.gstAmount || 0,
+      gatewayFee: requestData.gatewayFee || 0,
+      status: "paid",
+      processedAt: admin.database.ServerValue.TIMESTAMP,
+      approvedBy: "admin",
+      requestId
+    });
+
+    // ===== 6. Save in main orders collection =====
+    await db.ref(`orders/${paymentId}`).set({
+      userId,
+      phoneNo: userData.phoneNo,
+      userName: userData.name || 'N/A',
+      userEmail: userData.email || 'N/A',
+      type: "tokens",
+      amountPaid,
+      taxRate: "28%",
+      taxAmount,
+      creditedAmount: creditedTokens,
+      requestedTokens: requestData.requestedTokens,
+      netTokens: requestData.netTokens,
+      gstAmount: requestData.gstAmount || 0,
+      gatewayFee: requestData.gatewayFee || 0,
+      status: "paid",
+      taxDate: admin.database.ServerValue.TIMESTAMP,
+      processedAt: admin.database.ServerValue.TIMESTAMP,
+      requestId
+    });
+
+    // ===== 7. Update token request status =====
+    await requestRef.update({
+      status: 'approved',
+      approvedAt: admin.database.ServerValue.TIMESTAMP,
+      approvedDate: new Date().toISOString(),
+      tokensAdded: creditedTokens,
+      taxAmount,
+      processedBy: "admin"
+    });
+
+    // ===== 8. Update user's token request history =====
+    await db.ref(`Users/${userId}/tokenRequestHistory/${requestId}`).update({
+      status: 'approved',
+      approvedAt: admin.database.ServerValue.TIMESTAMP,
+      approvedDate: new Date().toISOString(),
+      tokensAdded: creditedTokens,
+      taxAmount
+    });
+
+    // ===== 9. Final Response =====
+    return res.status(200).json({
+      success: true,
+      message: "Tokens updated successfully",
+      data: {
+        tokens: newTokenBalance,
+        tokensAdded: creditedTokens,
+        taxAmount,
+        orderId: paymentId,
+        requestId
+      }
+    });
+
+  } catch (err) {
+    console.error("Admin Update Tokens Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to update tokens. Please try again."
+    });
+  }
+});
+
+
+// Optional: API to reject a token request
+app.post('/api/admin/reject-token-request', async (req, res) => {
+  const { userId, requestId, reason } = req.body;
+
+  if (!userId || !requestId) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing required fields: userId or requestId" 
+    });
+  }
+
+  try {
+    // Get the token request details
+    const requestRef = db.ref(`tokenRequests/${requestId}`);
+    const requestSnap = await requestRef.once('value');
+    
+    if (!requestSnap.exists()) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Token request not found" 
+      });
+    }
+
+    const requestData = requestSnap.val();
+
+    // Verify the request is still pending
+    if (requestData.status !== 'pending') {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Request already ${requestData.status}` 
+      });
+    }
+
+    // Update Token Request Status to 'rejected'
+    await requestRef.update({
+      status: 'rejected',
+      rejectedAt: admin.database.ServerValue.TIMESTAMP,
+      rejectedDate: new Date().toISOString(),
+      rejectionReason: reason || 'No reason provided',
+      processedBy: "admin"
+    });
+
+    // Update User's Token Request History
+    await db.ref(`Users/${userId}/tokenRequestHistory/${requestId}`).update({
+      status: 'rejected',
+      rejectedAt: admin.database.ServerValue.TIMESTAMP,
+      rejectedDate: new Date().toISOString(),
+      rejectionReason: reason || 'No reason provided'
+    });
+
+    res.json({
+      success: true,
+      message: "Token request rejected successfully"
+    });
+
+  } catch (err) {
+    console.error("Reject Token Request Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to reject token request. Please try again." 
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // user bank details api
  app.post('/api/banking/add', async (req, res) => {
     const { phoneNo, bankAccountNo, ifsc, upiId } = req.body;
@@ -4738,7 +5295,6 @@ app.post('/api/add-tokens', async (req, res) => {
       res.status(500).json({ error: "Failed to add banking details" });
     }
   });
-
 
  /**
  * Edit Banking Details
