@@ -1346,10 +1346,10 @@ async function generateAndStoreResults(sessionNumber, type) {
 // 🕒 Schedule Times
 function scheduleResultGeneration() {
   const scheduleTimes = [
-    { time: "11:19", session: "session-1", type: "open" },
-    { time: "11:20", session: "session-1", type: "close" },
-    { time: "11:20", session: "session-2", type: "open" },
-    { time: "11:21", session: "session-2", type: "close" }
+    { time: "14:30", session: "session-1", type: "open" },
+    { time: "17:30", session: "session-1", type: "close" },
+    { time: "21:30", session: "session-2", type: "open" },
+    { time: "23:30", session: "session-2", type: "close" }
   ];
 
   scheduleTimes.forEach(({ time, session, type }) => {
@@ -1691,13 +1691,13 @@ app.post('/api/match-results/new', async (req, res) => {
       "3-fruits-end": "close-pana"
     };
 
-    // Map gameMode to winType
+    // ✅ Updated plain text winType (no brackets)
     const gameModeToWinType = {
-      "1-fruits-start": "Single Digit Open",
-      "1-fruits-end": "Single Digit Close",
-      "2-fruits": "Jodi",
-      "3-fruits-start": "Single Pana Open",
-      "3-fruits-end": "Single Pana Close"
+      "1-fruits-start": "1 Fruits Start",
+      "1-fruits-end": "1 Fruits End",
+      "2-fruits": "2 Fruits",
+      "3-fruits-start": "3 Fruits Start",
+      "3-fruits-end": "3 Fruits End"
     };
 
     let totalWinners = 0;
@@ -1746,13 +1746,14 @@ app.post('/api/match-results/new', async (req, res) => {
 
         // Compare user's selected numbers with result
         const selectedStr = gameData.selectedNumbers.join(""); // user's selection
-        const resultStr = resultValue.toString();             // result as string
-        let isWin = selectedStr == resultStr;                // use == to ignore type
+        const resultStr = resultValue.toString();              // result as string
+        const isWin = selectedStr == resultStr;                // match check
 
         if (isWin) {
           const betAmount = parseFloat(gameData.betAmount) || 0;
           let amountWon = 0;
 
+          // Payout multipliers
           if (
             gameData.gameMode === "1-fruits-start" ||
             gameData.gameMode === "1-fruits-end" ||
@@ -1799,8 +1800,8 @@ app.post('/api/match-results/new', async (req, res) => {
 
     console.log(`\n🎉 Match results completed! Total winners: ${totalWinners}, Total amount won: ${totalAmountWon}`);
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       message: 'Match results completed successfully',
       summary: {
         date: today,
@@ -1815,225 +1816,265 @@ app.post('/api/match-results/new', async (req, res) => {
   }
 });
 
-
-cron.schedule('10 13 * * *', async () => {
+cron.schedule(
+  '55 23 * * *',
+  async () => {
     try {
-        const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
+      // ✅ Define API base URL inside the cron
+      const API_BASE_URL =
+        process.env.NODE_ENV === 'production'
+          ? 'https://naphex.com'
+          : 'http://localhost:3200';
 
-        console.log('Starting the match-results API call at 11:55 PM');
+      console.log('🕒 Starting the match-results API call at 1:36 PM IST');
 
-        const response = await axios.post(`${API_BASE_URL}/api/match-results/new`);
+      const response = await axios.post(`${API_BASE_URL}/api/match-results/new`);
 
-        console.log('Match-results API called successfully:', response.data);
+      console.log('✅ Match-results API called successfully:', response.data);
     } catch (error) {
-        console.error(
-            'Error calling the match-results API:',
-            error.response ? error.response.data : error.message
-        );
+      console.error(
+        '❌ Error calling the match-results API:',
+        error.response ? error.response.data : error.message
+      );
     }
-}, {
-    timezone: 'Asia/Kolkata'
-});
+  },
+  {
+    timezone: 'Asia/Kolkata',
+  }
+);
 
 
 
 //update game status token updated
 app.post('/api/update-game-status', async (req, res) => {
-    try {
-        const dbRef = firebaseAdmin.database();
-        const usersRef = dbRef.ref('/Users');
-        const winnersRef = dbRef.ref('/Winners');
+  try {
+    const dbRef = firebaseAdmin.database();
+    const usersRef = dbRef.ref('/Users');
+    const winnersRef = dbRef.ref('/Winners');
 
-        const now = moment().tz('Asia/Kolkata');
-        const today = now.format('YYYY-MM-DD');
+    const now = moment().tz('Asia/Kolkata');
+    const today = now.format('YYYY-MM-DD');
 
-        // Fetch all winners for today
-        const winnersSnapshot = await winnersRef.orderByChild('date').equalTo(today).once('value');
-        const winnersData = winnersSnapshot.val();
+    // ✅ Fetch today's winners (now deeply nested by session > user > game)
+    const winnersSnapshot = await winnersRef.child(today).once('value');
+    const winnersData = winnersSnapshot.val();
 
-        // Extract the winning game IDs
-        const winningGameIds = winnersData ? Object.values(winnersData).map(winner => winner.gameId) : [];
-
-        // Fetch all users
-        const usersSnapshot = await usersRef.once('value');
-        const usersData = usersSnapshot.val();
-
-        if (!usersData) {
-            return res.status(404).json({
-                success: false,
-                message: 'No users found',
-            });
-        }
-
-        let totalUpdated = 0;
-
-        // Iterate through all users
-        for (const [userId, userData] of Object.entries(usersData)) {
-            const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
-            const gamesSnapshot = await userGamesRef.once('value');
-            const gamesData = gamesSnapshot.val();
-
-            if (!gamesData) continue;
-
-            // Iterate through all the user's games
-            for (const [gameId, gameData] of Object.entries(gamesData)) {
-                // Only process games with status 'pending'
-                if (gameData.status !== 'pending') continue;
-
-                // Check if the current game ID is in the list of winning game IDs
-                if (winningGameIds.includes(gameId)) {
-                    // Update game status to "won"
-                    await userGamesRef.child(gameId).update({ status: 'won' });
-
-                    totalUpdated++;
-
-                    // Optionally, you can also update the user's tokens here if needed
-                    const betAmount = gameData.betAmount;
-                    const userTokensRef = usersRef.child(`${userId}/tokens`);
-                    await userTokensRef.transaction((currentTokens) => {
-                        return (currentTokens || 0) + (betAmount * 10);  // Example multiplier, adjust based on game mode
-                    });
-                } else {
-                    // Update game status to "lost"
-                    await userGamesRef.child(gameId).update({ status: 'lost' });
-                    totalUpdated++;
-                }
-            }
-        }
-
-        // Return a success response
-        res.status(200).json({
-            success: true,
-            message: `${totalUpdated} games status updated successfully.`,
-        });
-    } catch (error) {
-        console.error('Error in updating game status:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update game statuses',
-            error: error.message,
-        });
+    if (!winnersData) {
+      return res.status(404).json({
+        success: false,
+        message: `No winners found for date ${today}`,
+      });
     }
+
+    // ✅ Extract all winning game IDs from nested structure
+    const winningGameIds = [];
+    for (const [sessionKey, sessionUsers] of Object.entries(winnersData)) {
+      for (const [userId, userGames] of Object.entries(sessionUsers)) {
+        for (const [gameId, gameDetails] of Object.entries(userGames)) {
+          winningGameIds.push(gameId);
+        }
+      }
+    }
+
+    console.log(`🎯 Found ${winningGameIds.length} winning games for ${today}`);
+
+    // ✅ Fetch all users
+    const usersSnapshot = await usersRef.once('value');
+    const usersData = usersSnapshot.val();
+
+    if (!usersData) {
+      return res.status(404).json({
+        success: false,
+        message: 'No users found',
+      });
+    }
+
+    let totalUpdated = 0;
+
+    // ✅ Iterate through all users
+    for (const [userId, userData] of Object.entries(usersData)) {
+      const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
+      const gamesSnapshot = await userGamesRef.once('value');
+      const gamesData = gamesSnapshot.val();
+
+      if (!gamesData) continue;
+
+      // ✅ Iterate through all the user's games
+      for (const [gameId, gameData] of Object.entries(gamesData)) {
+        if (gameData.status !== 'pending') continue;
+
+        if (winningGameIds.includes(gameId)) {
+          // ✅ Mark as "won"
+          await userGamesRef.child(gameId).update({ status: 'won' });
+
+          // Optionally add tokens
+          const betAmount = parseFloat(gameData.betAmount) || 0;
+          await usersRef.child(`${userId}/tokens`).transaction((currentTokens) => {
+            return (currentTokens || 0) + betAmount * 10; // Example payout
+          });
+
+          console.log(`✅ Game ${gameId} for ${userId} marked as WON`);
+        } else {
+          // ✅ Mark as "lost"
+          await userGamesRef.child(gameId).update({ status: 'lost' });
+          console.log(`❌ Game ${gameId} for ${userId} marked as LOST`);
+        }
+
+        totalUpdated++;
+      }
+    }
+
+    // ✅ Send response
+    res.status(200).json({
+      success: true,
+      message: `${totalUpdated} game statuses updated successfully.`,
+      totalUpdated,
+    });
+
+  } catch (error) {
+    console.error('Error in updating game status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update game statuses',
+      error: error.message,
+    });
+  }
 });
 
-cron.schedule('11 13 * * *', async () => {
-    try {
-        const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
 
-        console.log('Running /update-game-status cron job at 11:57 PM');
+cron.schedule('57 23 * * *', async () => {
+  try {
+    const API_BASE_URL =
+      process.env.NODE_ENV === 'production'
+        ? 'https://naphex.com'
+        : 'http://localhost:3200';
 
-        const response = await axios.post(`${API_BASE_URL}/api/update-game-status`);
+    console.log(`🚀 Running /update-game-status cron job at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`);
+    console.log(`🌐 Using API_BASE_URL: ${API_BASE_URL}`);
 
-        console.log('Game status update result:', response.data);
-    } catch (error) {
-        console.error(
-            'Error running /update-game-status cron job:',
-            error.response ? error.response.data : error.message
-        );
-    }
+    const response = await axios.post(`${API_BASE_URL}/api/update-game-status`);
+
+    console.log('✅ Game status update result:', response.data);
+  } catch (error) {
+    console.error(
+      '❌ Error running /update-game-status cron job:',
+      error.response ? error.response.data : error.message
+    );
+  }
 }, {
-    timezone: 'Asia/Kolkata'
+  timezone: 'Asia/Kolkata'
 });
-
 //add wins subcollection to user ds
 app.post('/api/add-winner-to-wins', async (req, res) => {
-    try {
-        const dbRef = firebaseAdmin.database();
-        const winnersRef = dbRef.ref('/Winners');
+  try {
+    const dbRef = firebaseAdmin.database();
+    const winnersRef = dbRef.ref('/Winners');
+    const usersRef = dbRef.ref('/Users');
 
-        // Fetch all winners
-        const winnersSnapshot = await winnersRef.once('value');
-        const winnersData = winnersSnapshot.val();
+    // Fetch all winners
+    const winnersSnapshot = await winnersRef.once('value');
+    const winnersData = winnersSnapshot.val();
 
-        if (!winnersData) {
-            return res.status(404).json({
-                success: false,
-                message: 'No winners found'
-            });
-        }
+    if (!winnersData) {
+      return res.status(404).json({
+        success: false,
+        message: 'No winners found in /Winners collection',
+      });
+    }
 
-        // Counter for processed winners
-        let processedWinnersCount = 0;
+    let processedWinnersCount = 0;
 
-        // Process each winner
-        for (const [winnerId, winnerData] of Object.entries(winnersData)) {
-            // Destructure winner data
+    // Loop through structure: date → session → userId → gameId → winnerData
+    for (const [date, sessions] of Object.entries(winnersData)) {
+      for (const [sessionKey, users] of Object.entries(sessions)) {
+        for (const [userId, userGames] of Object.entries(users)) {
+          for (const [gameId, winner] of Object.entries(userGames)) {
+            if (!winner || !userId || !gameId) continue;
+
             const {
-                userId,
-                gameId,
-                session,
-                winType,
-                betAmount,
-                amountWon,
-                phoneNo,
-                date
-            } = winnerData;
+              winType,
+              betAmount,
+              amountWon,
+              phoneNo,
+              resultNumbers,
+              selectedNumbers,
+              session,
+              timestamp,
+            } = winner;
 
-            // Validate required fields
-            if (!userId || !gameId) {
-                console.warn(`Skipping winner ${winnerId} due to missing userId or gameId`);
-                continue;
-            }
+            // Reference to user's wins subcollection
+            const userWinsRef = usersRef.child(`${userId}/game1/wins`);
+            const newWinRef = userWinsRef.push();
 
-            // Reference to the user's game wins
-            const userGameWinsRef = dbRef.ref(`Users/${userId}/game1/wins`);
-
-            // Create a new win entry
-            const newWinRef = userGameWinsRef.push();
-
-            // Prepare win data
+            // Prepare data
             const winData = {
-                winnerId,
-                gameId,
-                session,
-                winType,
-                betAmount,
-                amountWon,
-                phoneNo: phoneNo || null,
-                date: date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD'),
+              gameId,
+              session: session || sessionKey,
+              winType: winType || 'N/A',
+              betAmount: betAmount || 0,
+              amountWon: amountWon || 0,
+              phoneNo: phoneNo || null,
+              date: date,
+              resultNumbers: resultNumbers || '',
+              selectedNumbers: selectedNumbers || '',
+              timestamp: timestamp || moment().tz('Asia/Kolkata').valueOf(),
             };
 
-            // Save the win entry
+            // Save to user's wins
             await newWinRef.set(winData);
 
             processedWinnersCount++;
+          }
         }
-
-        res.status(200).json({
-            success: true,
-            message: 'Winners added to wins subcollection',
-            processedWinnersCount
-        });
-
-    } catch (error) {
-        console.error('Error adding winners to wins subcollection:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to add winners to wins subcollection',
-            error: error.message
-        });
+      }
     }
+
+    res.status(200).json({
+      success: true,
+      message: `Winners added to users' wins successfully`,
+      processedWinnersCount,
+    });
+  } catch (error) {
+    console.error('❌ Error adding winners to wins subcollection:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add winners to wins subcollection',
+      error: error.message,
+    });
+  }
 });
 
-cron.schedule('12 13 * * *', async () => {
+
+cron.schedule(
+  '57 23 * * *',
+  async () => {
     try {
-        const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
+      const API_BASE_URL =
+        process.env.NODE_ENV === 'production'
+          ? 'https://naphex.com'
+          : 'http://localhost:3200';
 
-        console.log('Running /add-winner-to-wins cron job at 11:57 PM');
+      console.log(
+        `🚀 Running /add-winner-to-wins cron job at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+      );
+      console.log(`🌐 Using API_BASE_URL: ${API_BASE_URL}`);
 
-        const response = await axios.post(`${API_BASE_URL}/api/add-winner-to-wins`);
+      const response = await axios.post(`${API_BASE_URL}/api/add-winner-to-wins`);
 
-        console.log('Winners to wins subcollection update result:', response.data);
+      console.log('✅ Winners → wins update result:', response.data);
     } catch (error) {
-        console.error(
-            'Error running /add-winner-to-wins cron job:',
-            error.response ? error.response.data : error.message
-        );
+      console.error(
+        '❌ Error running /add-winner-to-wins cron job:',
+        error.response ? error.response.data : error.message
+      );
     }
-}, {
+  },
+  {
     scheduled: true,
-    timezone: "Asia/Kolkata"
-});
+    timezone: 'Asia/Kolkata',
+  }
+);
+
 
 
 
@@ -2072,123 +2113,105 @@ app.get('/api/fetch-winners', async (req, res) => {
 
 //Open Close Game Admin Profit
 app.get('/api/updateGameDetails', async (req, res) => {
-    // Set headers for SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    try {
+        let totalPlayerBetAmount = 0;
+        let totalPlayerWinAmount = 0;
 
-    // Function to calculate and send game details
-    const calculateAndSendGameDetails = async () => {
-        try {
-            let totalPlayerBetAmount = 0;
-            let totalPlayerWinAmount = 0;
+        // 1. Get the reference to the Firebase Realtime Database
+        const db = firebaseAdmin.database();
 
-            // 1. Get the reference to the Firebase Realtime Database
-            const db = firebaseAdmin.database();
+        // 2. Fetch all users from 'Users' collection
+        const usersSnapshot = await db.ref('Users').once('value');
+        const usersData = usersSnapshot.val();
 
-            // 2. Fetch all users from 'Users' collection
-            const usersSnapshot = await db.ref('Users').once('value');
-            const usersData = usersSnapshot.val();
+        if (!usersData) {
+            return res.status(200).json({
+                success: false,
+                message: 'No users found in the Users collection'
+            });
+        }
 
-            if (!usersData) {
-                res.write(`data: ${JSON.stringify({
-                    success: false,
-                    message: 'No users found in the Users collection'
-                })}\n\n`);
-                return;
+        // 3. Loop through each user
+        Object.keys(usersData).forEach(userId => {
+            const userData = usersData[userId];
+
+            // Calculate bet amounts
+            if (userData?.game1?.['game-actions']) {
+                const gameActions = userData.game1['game-actions'];
+                Object.values(gameActions).forEach(action => {
+                    totalPlayerBetAmount += parseFloat(action?.betAmount || 0);
+                });
             }
 
-            // 3. Loop through each user
-            Object.keys(usersData).forEach(userId => {
-                const userData = usersData[userId];
+            // Calculate win amounts
+            if (userData?.game1?.wins) {
+                const wins = userData.game1.wins;
+                Object.values(wins).forEach(win => {
+                    totalPlayerWinAmount += parseFloat(win?.amountWon || 0);
+                });
+            }
+        });
 
-                // Check if game1 and game-actions exist
-                if (userData?.game1?.['game-actions']) {
-                    // Calculate bet amounts
-                    const gameActions = userData.game1['game-actions'];
-                    Object.keys(gameActions).forEach(gameId => {
-                        const betAmount = parseFloat(gameActions[gameId]?.betAmount) || 0;
-                        totalPlayerBetAmount += betAmount;
-                    });
-                }
+        // 4. Calculate totalNetProfit (profit or loss)
+        const totalNetProfit = totalPlayerBetAmount - totalPlayerWinAmount;
 
-                // Check if game1 and wins exist
-                if (userData?.game1?.wins) {
-                    // Calculate win amounts
-                    const wins = userData.game1.wins;
-                    Object.keys(wins).forEach(winId => {
-                        const amountWon = parseFloat(wins[winId]?.amountWon) || 0;
-                        totalPlayerWinAmount += amountWon;
-                    });
-                }
-            });
+        // 5. Update the 'OpenCloseGameDetails' node with calculated values
+        const gameDetailsRef = db.ref('OpenCloseGameDetails');
+        const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        await gameDetailsRef.child('totalPlayerBetAmount').set(totalPlayerBetAmount);
+        await gameDetailsRef.child('totalPlayerWinAmount').set(totalPlayerWinAmount);
+        await gameDetailsRef.child('dailyProfitLoss').child(today).set(totalNetProfit);
 
-            // 4. Calculate totalNetProfit (profit or loss)
-            const totalNetProfit = totalPlayerBetAmount - totalPlayerWinAmount;
-
-            // 5. Update the 'OpenCloseGameDetails' node with calculated values
-            const gameDetailsRef = db.ref('OpenCloseGameDetails');
-            const today = new Date().toISOString().slice(0, 10); // Get today's date in YYYY-MM-DD format
-            await gameDetailsRef.child('totalPlayerBetAmount').set(totalPlayerBetAmount);
-            await gameDetailsRef.child('totalPlayerWinAmount').set(totalPlayerWinAmount);
-            await gameDetailsRef.child('dailyProfitLoss').child(today).set(totalNetProfit);
-
-            // 6. Send the calculated details via SSE
-            res.write(`data: ${JSON.stringify({
-                success: true,
-                message: 'Game details updated successfully!',
-                totalPlayerBetAmount,
-                totalPlayerWinAmount,
-                totalNetProfit
-            })}\n\n`);
-        } catch (error) {
-            console.error('Error updating game details:', error);
-            res.write(`data: ${JSON.stringify({
-                success: false,
-                message: 'Internal Server Error',
-                error: error.message
-            })}\n\n`);
-        }
-    };
-
-    // Initial calculation
-    await calculateAndSendGameDetails();
-
-    // Set up real-time listener for Users collection
-    const db = firebaseAdmin.database();
-    const usersRef = db.ref('Users');
-
-    // Listen for any changes in the Users collection
-    const changeListener = usersRef.on('value', () => {
-        calculateAndSendGameDetails();
-    });
-
-    // Handle client disconnection
-    req.on('close', () => {
-        console.log('Client disconnected from /updateGameDetails');
-        // Remove the listener when client disconnects
-        usersRef.off('value', changeListener);
-    });
-});
-
-cron.schedule('58 23 * * *', async () => {
-    try {
-        const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3200';
-
-        console.log('Running cron job to update game details at 11:58 PM');
-
-        const response = await axios.get(`${API_BASE_URL}/api/updateGameDetails`);
-
-        console.log('Game details updated successfully via cron job:', response.data);
+        // 6. Return calculated details as JSON
+        return res.status(200).json({
+            success: true,
+            message: 'Game details updated successfully!',
+            totalPlayerBetAmount,
+            totalPlayerWinAmount,
+            totalNetProfit
+        });
     } catch (error) {
-        console.error(
-            'Error running the cron job:',
-            error.response ? error.response.data : error.message
-        );
+        console.error('Error updating game details:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal Server Error',
+            error: error.message
+        });
     }
-}, {
-    timezone: 'Asia/Kolkata'
 });
+
+
+cron.schedule(
+  '58 23 * * *',
+  async () => {
+    try {
+      const API_BASE_URL =
+        process.env.NODE_ENV === 'production'
+          ? 'https://naphex.com'      // Production URL
+          : 'http://localhost:3200'; // Local URL
+
+      console.log(
+        `🚀 Running /updateGameDetails cron job at ${new Date().toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata'
+        })}`
+      );
+      console.log(`🌐 Using API_BASE_URL: ${API_BASE_URL}`);
+
+      const response = await axios.get(`${API_BASE_URL}/api/updateGameDetails`);
+
+      console.log('✅ Game details updated successfully via cron job:', response.data);
+    } catch (error) {
+      console.error(
+        '❌ Error running /updateGameDetails cron job:',
+        error.response ? error.response.data : error.message
+      );
+    }
+  },
+  {
+    scheduled: true,
+    timezone: 'Asia/Kolkata',
+  }
+);
 
 //for main component
 app.get('/api/getOpenCloseProfitLoss', (req, res) => {
@@ -2318,90 +2341,145 @@ app.get('/api/gameDetailsStream', (req, res) => {
     sendGameDetails();
 });
 
-
 // send winner winner notification
 app.get('/api/get-winners', async (req, res) => {
-    try {
-        const db = admin.database();
-        const winnersRef = db.ref('Winners');
-        
-        const snapshot = await winnersRef.once('value');
-        const winners = snapshot.val();
-        
-        // Convert to array and include all winner data with IDs
-        const winnersList = Object.keys(winners || {}).map(key => ({
-            id: key,
-            ...winners[key]
-        }));
-        
-        res.json(winnersList);
-    } catch (error) {
-        console.error('Error fetching winners:', error);
-        res.status(500).json({ error: true, message: 'Internal server error' });
+  try {
+    const db = admin.database();
+    const winnersRef = db.ref('Winners');
+
+    const snapshot = await winnersRef.once('value');
+    const winnersData = snapshot.val();
+
+    // Flatten nested structure into array
+    const winnersList = [];
+
+    for (const [date, sessions] of Object.entries(winnersData || {})) {
+      for (const [sessionKey, users] of Object.entries(sessions || {})) {
+        for (const [userId, userGames] of Object.entries(users || {})) {
+          for (const [gameId, winner] of Object.entries(userGames || {})) {
+            winnersList.push({
+              date,
+              session: sessionKey,
+              userId,
+              gameId,
+              ...winner,
+            });
+          }
+        }
+      }
     }
+
+    res.json({
+      success: true,
+      message: 'All winners fetched successfully',
+      winners: winnersList,
+      count: winnersList.length,
+    });
+  } catch (error) {
+    console.error('Error fetching winners:', error);
+    res.status(500).json({ error: true, message: 'Internal server error' });
+  }
 });
 
-app.post('/api/mark-winner-claimed/:winnerId', async (req, res) => {
-    try {
-        const { winnerId } = req.params;
-        const db = admin.database();
-        const winnersRef = db.ref('Winners');
-        
-        // Check if the winner exists
-        const winnerSnapshot = await winnersRef.child(winnerId).once('value');
-        
-        if (!winnerSnapshot.exists()) {
-            return res.status(404).json({
-                success: false,
-                message: "Winner not found"
-            });
-        }
-        
-        // Update the specific winner's popupShown flag
-        await winnersRef.child(winnerId).update({
-            popupShown: true,
-            claimedAt: admin.database.ServerValue.TIMESTAMP
-        });
-        
-        res.json({
-            success: true,
-            message: "Winner popup marked as shown"
-        });
-        
-    } catch (error) {
-        console.error('Error marking winner as claimed:', error);
-        res.status(500).json({
-            error: true,
-            message: 'Internal server error'
-        });
+
+app.post('/api/mark-winner-claimed/:date/:session/:userId/:gameId', async (req, res) => {
+  try {
+    const { date, session, userId, gameId } = req.params;
+    const db = admin.database();
+    const winnerRef = db.ref(`Winners/${date}/${session}/${userId}/${gameId}`);
+
+    const winnerSnapshot = await winnerRef.once('value');
+
+    if (!winnerSnapshot.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: 'Winner not found',
+      });
     }
+
+    await winnerRef.update({
+      popupShown: true,
+      claimedAt: admin.database.ServerValue.TIMESTAMP,
+    });
+
+    res.json({
+      success: true,
+      message: 'Winner popup marked as shown',
+    });
+  } catch (error) {
+    console.error('Error marking winner as claimed:', error);
+    res.status(500).json({
+      error: true,
+      message: 'Internal server error',
+    });
+  }
 });
 
 
 
 app.get('/api/get-user-winners/:phoneNo', async (req, res) => {
-    try {
-        const { phoneNo } = req.params;
-        const db = admin.database();
-        const winnersRef = db.ref('Winners');
-        
-        const snapshot = await winnersRef.orderByChild('phoneNo').equalTo(phoneNo).once('value');
-        const winners = snapshot.val();
-        
-        // Convert to array and filter unshown winners
-        const winnersList = Object.keys(winners || {})
-            .map(key => ({
-                id: key,
-                ...winners[key]
-            }))
-            .filter(winner => !winner.popupShown);
-        
-        res.json(winnersList);
-    } catch (error) {
-        console.error('Error fetching user winners:', error);
-        res.status(500).json({ error: true, message: 'Internal server error' });
+  try {
+    const { phoneNo } = req.params;
+    const db = admin.database();
+    const winnersRef = db.ref('Winners');
+
+    // Fetch all winners
+    const snapshot = await winnersRef.once('value');
+    const winnersData = snapshot.val();
+
+    if (!winnersData) {
+      return res.json({
+        success: true,
+        message: 'No winners found for this user',
+        winners: [],
+        count: 0,
+      });
     }
+
+    const winnersList = [];
+
+    // Loop through winners by date
+    for (const [date, sessions] of Object.entries(winnersData)) {
+      for (const [sessionKey, users] of Object.entries(sessions || {})) {
+        for (const [userId, userGames] of Object.entries(users || {})) {
+          for (const [gameId, winner] of Object.entries(userGames || {})) {
+            // Match phone number and check if popupShown is false or undefined
+            if (winner.phoneNo === phoneNo && !winner.popupShown) {
+              winnersList.push({
+                date,
+                session: sessionKey,
+                userId,
+                gameId,
+                amountWon: winner.amountWon,
+                betAmount: winner.betAmount,
+                resultNumbers: winner.resultNumbers,
+                selectedNumbers: winner.selectedNumbers,
+                timestamp: winner.timestamp,
+                winType: winner.winType,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'User winners fetched successfully',
+      winners: winnersList,
+      count: winnersList.length,
+    });
+
+  } catch (error) {
+    console.error('Error fetching user winners:', error);
+    res.status(500).json({
+      error: true,
+      message: 'Internal server error'
+    });
+  }
 });
+
+
 
 //Game 2 action demo
 app.post('/api/store-game2-action', async (req, res) => {
