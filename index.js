@@ -50,11 +50,11 @@ app.use(status())
 
 
 
-//Multer for file uploads 
+// Multer for file uploads 
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
-        fileSize: 5 * 1024 * 1024 // 5MB file size limit
+        fileSize: 100 * 1024 * 1024 // 100MB file size limit
     },
     fileFilter: (req, file, cb) => {
         // Accept image files only
@@ -65,6 +65,7 @@ const upload = multer({
         }
     }
 });
+
 
 const port = 3200;
 
@@ -1349,7 +1350,7 @@ function scheduleResultGeneration() {
     { time: "14:30", session: "session-1", type: "open" },
     { time: "17:30", session: "session-1", type: "close" },
     { time: "21:30", session: "session-2", type: "open" },
-    { time: "23:30", session: "session-2", type: "close" }
+    { time: "23:50", session: "session-2", type: "close" }
   ];
 
   scheduleTimes.forEach(({ time, session, type }) => {
@@ -4727,19 +4728,26 @@ app.post('/api/add-tokens', async (req, res) => {
 
 //Apis for entry fees and add tokens manual
 
-// API endpoint to submit order ID and create entry fee request
-app.post('/api/submit-order-id', async (req, res) => {
-  const { phoneNo, orderId, amount } = req.body;
+// API to submit entry fee payment (with screenshot upload)
+app.post('/api/submit-order-id', upload.single('screenshot'), async (req, res) => {
+  const { phoneNo, transactionId, amount } = req.body;
+  const screenshotFile = req.file;
 
-  if (!phoneNo || !orderId || !amount) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Missing phoneNo, orderId, or amount" 
+  if (!phoneNo || !amount) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing phoneNo or amount"
+    });
+  }
+
+  if (!screenshotFile) {
+    return res.status(400).json({
+      success: false,
+      error: "Payment screenshot is required"
     });
   }
 
   try {
-    // Find user by phone number
     const usersSnap = await db.ref('Users').once('value');
     const users = usersSnap.val();
 
@@ -4754,74 +4762,86 @@ app.post('/api/submit-order-id', async (req, res) => {
     }
 
     if (!userKey) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "User not found" 
-      });
+      return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    // Check if already submitted or paid
     if (userData.entryFee === 'paid') {
-      return res.json({ 
-        success: false, 
-        error: "Entry fee already paid and verified" 
-      });
+      return res.json({ success: false, error: "Entry fee already paid and verified" });
     }
 
     if (userData.entryFee === 'pending') {
-      return res.json({ 
-        success: false, 
-        error: "Entry fee verification already pending" 
-      });
+      return res.json({ success: false, error: "Entry fee verification already pending" });
     }
 
-    // Create entry fee request in subcollection
+    // Upload screenshot to Firebase Storage
+    const bucket = admin.storage().bucket();
+    const timestamp = Date.now();
+    const uniqueId = uuidv4();
+    const fileName = `payment_screenshots/${phoneNo}_${timestamp}_${uniqueId}${path.extname(screenshotFile.originalname)}`;
+    const file = bucket.file(fileName);
+
+    await file.save(screenshotFile.buffer, {
+      metadata: {
+        contentType: screenshotFile.mimetype,
+        metadata: {
+          phoneNo,
+          uploadedAt: new Date().toISOString()
+        }
+      }
+    });
+
+    await file.makePublic();
+    const screenshotUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+    // Generate orderId (like old flow)
+    const orderId = `ORD_${timestamp}_${uniqueId.substring(0, 8)}`;
+
+    // Create entry fee request
     const requestData = {
       phoneNo,
-      orderId,
+      transactionId: transactionId || 'N/A',
       amount,
       userKey,
       userName: userData.name || 'N/A',
       userEmail: userData.email || 'N/A',
-      status: 'pending', // pending, approved, rejected
+      screenshotUrl,
+      screenshotFileName: fileName,
+      status: 'pending',
       submittedAt: admin.database.ServerValue.TIMESTAMP,
       submittedDate: new Date().toISOString()
     };
 
-    // Store in entryFeesRequest subcollection
     await db.ref(`entryFeesRequest/${orderId}`).set(requestData);
 
-    // Update user's entryFee status to pending
     await db.ref(`Users/${userKey}`).update({
       entryFee: 'pending',
       entryFeeOrderId: orderId,
       entryFeeAmount: amount,
+      entryFeeScreenshotUrl: screenshotUrl,
       entryFeeSubmittedAt: admin.database.ServerValue.TIMESTAMP
     });
 
     res.json({
       success: true,
-      message: "Order ID submitted successfully. Admin will verify your payment soon."
+      message: "Payment details submitted successfully. Admin will verify soon.",
+      orderId
     });
 
   } catch (err) {
-    console.error("Submit Order ID Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to submit order ID. Please try again." 
+    console.error("Submit Payment Details Error:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message || "Failed to submit payment details. Please try again."
     });
   }
 });
 
-// API endpoint to check entry fee status
+// ✅ API to check entry fee status
 app.post('/api/check-entry-fee', async (req, res) => {
   const { phoneNo } = req.body;
 
   if (!phoneNo) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Missing phoneNo" 
-    });
+    return res.status(400).json({ success: false, error: "Missing phoneNo" });
   }
 
   try {
@@ -4837,185 +4857,229 @@ app.post('/api/check-entry-fee', async (req, res) => {
     }
 
     if (!userData) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "User not found" 
-      });
+      return res.status(404).json({ success: false, error: "User not found" });
     }
-
-    // Check entry fee status
-    const entryFeeStatus = userData.entryFee || 'unpaid';
 
     res.json({
       success: true,
-      entryFee: entryFeeStatus
+      entryFee: userData.entryFee || 'unpaid'
     });
 
   } catch (err) {
     console.error("Check Entry Fee Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to check entry fee status" 
-    });
+    res.status(500).json({ success: false, error: "Failed to check entry fee status" });
   }
 });
 
-// Admin endpoint to approve or reject entry fee request
+// ✅ Admin endpoint for approval/rejection (creates same DS as old orders)
+// ✅ Admin endpoint for approval/rejection using existing order ID
 app.post('/api/admin/verify-entry-fee', async (req, res) => {
-  const { orderId, approved, adminNote } = req.body;
-
-  if (!orderId || approved === undefined) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Missing orderId or approved status" 
+  const { orderId, userKey, phoneNo, approved, adminNote } = req.body;
+  
+  if (!orderId || !userKey || approved === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing required fields: orderId, userKey, or approved status"
     });
   }
-
+  
   try {
-    // Get the request data from entryFeesRequest
-    const requestSnap = await db.ref(`entryFeesRequest/${orderId}`).once('value');
-    const requestData = requestSnap.val();
-
-    if (!requestData) {
-      return res.status(404).json({ 
+    // Get user data
+    const userSnap = await db.ref(`Users/${userKey}`).once('value');
+    const userData = userSnap.val();
+    
+    if (!userData) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    
+    // Verify this order ID matches the user's pending request
+    if (userData.entryFeeOrderId !== orderId) {
+      return res.status(400).json({ 
         success: false, 
-        error: "Entry fee request not found" 
+        error: "Order ID mismatch. This request may have been already processed." 
       });
     }
-
-    const { phoneNo, amount, userKey } = requestData;
-
+    
+    const amount = parseFloat(userData.entryFeeAmount || 500);
+    const screenshotUrl = userData.entryFeeScreenshotUrl;
+    const transactionId = userData.entryFeeTransactionId;
+    
     if (approved) {
-      // ===== APPROVED: Process payment with same structure as Cashfree =====
+      // APPROVE CASE
+      const taxAmount = +(amount * 0.28).toFixed(2);
+      const creditedAmount = +(amount - taxAmount).toFixed(2);
       
-      const amountPaid = amount; // Fixed entry fee (500)
-      
-      // Calculate tax and credited amount
-      const taxAmount = +(amountPaid * 0.28).toFixed(2); // 28% tax
-      const creditedAmount = +(amountPaid - taxAmount).toFixed(2); // 72% amount
-
       const userRef = db.ref(`Users/${userKey}`);
-
-      // ===== 1. Update User Main Data (token update removed) =====
+      
+      // 1️⃣ Update main user data
       await userRef.update({
         entryFee: "paid",
         entryFeePaidAt: admin.database.ServerValue.TIMESTAMP,
-        entryFeeOrderId: orderId,
-        entryFeeAmount: amountPaid
+        entryFeeOrderId: orderId, // Keep the same order ID
+        entryFeeAmount: amount,
+        entryFeeAdminNote: adminNote || 'Payment verified and approved',
+        // Clear pending submission timestamp
+        entryFeeSubmittedAt: null
       });
-
-      // ===== 2. Add to User's Orders Sub-Collection =====
+      
+      // 2️⃣ Add to user orders subcollection
       await db.ref(`Users/${userKey}/orders/${orderId}`).set({
         type: "entry_fee",
         paymentDetails: {
-          method: "razorpay",
-          orderId: orderId,
-          verifiedBy: "admin"
+          method: "manual_verification",
+          verifiedBy: "admin",
+          transactionId: transactionId || 'N/A'
         },
-        amountPaid,
+        amountPaid: amount,
         taxAmount,
         taxRate: "28%",
+        creditedAmount,
         status: "paid",
-        processedAt: admin.database.ServerValue.TIMESTAMP
+        processedAt: admin.database.ServerValue.TIMESTAMP,
+        createdAt: admin.database.ServerValue.TIMESTAMP
       });
-
-      // ===== 3. Update Main Orders Collection =====
-      const orderSnap = await db.ref(`orders/${orderId}`).once('value');
-      const existingOrder = orderSnap.val();
-
-      if (existingOrder) {
-        await db.ref(`orders/${orderId}`).update({
-          taxAmount,
-          creditedAmount,
-          taxRate: "28%",
-          taxDate: admin.database.ServerValue.TIMESTAMP,
-          status: "paid",
-          verifiedBy: "admin"
-        });
-      } else {
-        await db.ref(`orders/${orderId}`).set({
-          phoneNo,
-          userKey,
-          type: "entry_fee",
-          orderId,
-          amountPaid,
-          taxAmount,
-          creditedAmount,
-          taxRate: "28%",
-          status: "paid",
-          taxDate: admin.database.ServerValue.TIMESTAMP,
-          verifiedBy: "admin",
-          createdAt: admin.database.ServerValue.TIMESTAMP
-        });
-      }
-
-      // ===== 4. Update entryFeesRequest status to approved =====
-      await db.ref(`entryFeesRequest/${orderId}`).update({
+      
+      // 3️⃣ Add to main orders collection
+      await db.ref(`orders/${orderId}`).set({
+        phoneNo: phoneNo || userData.phoneNo,
+        userKey,
+        type: "entry_fee",
+        orderId,
+        amountPaid: amount,
+        taxAmount,
+        creditedAmount,
+        taxRate: "28%",
+        status: "paid",
+        verifiedBy: "admin",
+        transactionId: transactionId || 'N/A',
+        screenshotUrl,
+        createdAt: admin.database.ServerValue.TIMESTAMP,
+        processedAt: admin.database.ServerValue.TIMESTAMP,
+        adminNote: adminNote || 'Payment verified and approved'
+      });
+      
+      // 4️⃣ Create/Update entryFeesRequest record (for history)
+      await db.ref(`entryFeesRequest/${orderId}`).set({
+        phoneNo: phoneNo || userData.phoneNo,
+        userKey,
+        amount,
+        transactionId: transactionId || 'N/A',
+        screenshotFileName: screenshotUrl ? screenshotUrl.split('/').pop() : null,
         status: 'approved',
         approvedAt: admin.database.ServerValue.TIMESTAMP,
         approvedDate: new Date().toISOString(),
         adminNote: adminNote || 'Payment verified and approved',
         taxAmount,
-        creditedAmount
+        creditedAmount,
+        taxRate: "28%"
       });
-
+      
       res.json({
         success: true,
-        message: "Entry fee recorded successfully with tax.",
-        amountPaid,
+        message: `Payment approved successfully! Order ID: ${orderId}`,
+        orderId,
+        amountPaid: amount,
         taxAmount,
         creditedAmount
       });
-
-    } else {
-      // ===== REJECTED =====
       
+    } else {
+     // REJECT CASE
+      
+      // Delete screenshot from storage if it exists
+      if (screenshotUrl) {
+        try {
+          const bucket = admin.storage().bucket();
+          // Extract filename from URL
+          const urlParts = screenshotUrl.split('/');
+          const encodedFilename = urlParts[urlParts.length - 1];
+          const filename = decodeURIComponent(encodedFilename.split('?')[0]);
+          
+          // Try to delete from payment_screenshots folder
+          const filePath = filename.includes('payment_screenshots/') 
+            ? filename 
+            : `payment_screenshots/${filename}`;
+          
+          const file = bucket.file(filePath);
+          const [exists] = await file.exists();
+          
+          if (exists) {
+            await file.delete();
+            console.log('Screenshot deleted:', filePath);
+          }
+        } catch (err) {
+          console.error('Error deleting screenshot:', err);
+          // Continue even if deletion fails
+        }
+      }
+      
+      // Clear user's pending entry fee data
       await db.ref(`Users/${userKey}`).update({
         entryFee: "unpaid",
         entryFeeOrderId: null,
         entryFeeAmount: null,
-        entryFeeSubmittedAt: null
+        entryFeeSubmittedAt: null,
+        entryFeeScreenshotUrl: null,
+        entryFeeTransactionId: null,
+        entryFeeAdminNote: adminNote || 'Payment verification failed'
       });
-
-      await db.ref(`entryFeesRequest/${orderId}`).update({
+      
+      // Create/Update entryFeesRequest record as rejected (for history)
+      await db.ref(`entryFeesRequest/${orderId}`).set({
+        phoneNo: phoneNo || userData.phoneNo,
+        userKey,
+        amount,
+        transactionId: transactionId || 'N/A',
         status: 'rejected',
         rejectedAt: admin.database.ServerValue.TIMESTAMP,
         rejectedDate: new Date().toISOString(),
         adminNote: adminNote || 'Payment verification failed'
       });
-
+      
       res.json({
         success: true,
-        message: "Entry fee request rejected"
+        message: "Payment rejected and data cleared successfully."
       });
     }
-
+    
   } catch (err) {
     console.error("Verify Entry Fee Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to verify entry fee request. Please try again." 
+    res.status(500).json({
+      success: false,
+      error: "Failed to verify entry fee. Please try again.",
+      details: err.message
     });
   }
 });
 
 
-// API endpoint to submit token request
-app.post('/api/submit-token-request', async (req, res) => {
+
+
+
+// API endpoint to submit token request with screenshot upload
+app.post('/api/submit-token-request', upload.single('screenshot'), async (req, res) => {
   const { 
     phoneNo, 
-    paymentId, 
+    transactionId, 
     requestedTokens, 
     netTokens, 
     amountPaid, 
-    gstAmount, 
-    gatewayFee 
+    gstAmount 
   } = req.body;
+  
+  const screenshotFile = req.file;
 
-  if (!phoneNo || !paymentId || !requestedTokens || !netTokens || !amountPaid) {
+  if (!phoneNo || !requestedTokens || !netTokens || !amountPaid) {
     return res.status(400).json({ 
       success: false, 
       error: "Missing required fields" 
+    });
+  }
+
+  if (!screenshotFile) {
+    return res.status(400).json({
+      success: false,
+      error: "Payment screenshot is required"
     });
   }
 
@@ -5041,54 +5105,69 @@ app.post('/api/submit-token-request', async (req, res) => {
       });
     }
 
-    // Check if this payment ID already exists
-    const existingRequestSnap = await db.ref('tokenRequests').orderByChild('paymentId').equalTo(paymentId).once('value');
-    if (existingRequestSnap.exists()) {
-      return res.json({ 
-        success: false, 
-        error: "This Payment ID has already been submitted" 
-      });
-    }
+    // Upload screenshot to Firebase Storage
+    const bucket = admin.storage().bucket();
+    const timestamp = Date.now();
+    const uniqueId = uuidv4();
+    const fileName = `token_payment_screenshots/${phoneNo}_${timestamp}_${uniqueId}${path.extname(screenshotFile.originalname)}`;
+    const file = bucket.file(fileName);
+
+    await file.save(screenshotFile.buffer, {
+      metadata: {
+        contentType: screenshotFile.mimetype,
+        metadata: {
+          phoneNo,
+          uploadedAt: new Date().toISOString(),
+          type: 'token_payment'
+        }
+      }
+    });
+
+    await file.makePublic();
+    const screenshotUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+    // Generate unique request ID
+    const requestId = `TOK_${timestamp}_${uniqueId.substring(0, 8)}`;
 
     // Create token request data
     const requestData = {
       phoneNo,
-      paymentId,
+      transactionId: transactionId || 'N/A',
       requestedTokens: parseInt(requestedTokens),
       netTokens: parseFloat(netTokens),
       amountPaid: parseFloat(amountPaid),
       gstAmount: parseFloat(gstAmount || 0),
-      gatewayFee: parseFloat(gatewayFee || 0),
       userKey,
       userName: userData.name || 'N/A',
       userEmail: userData.email || 'N/A',
       currentTokens: userData.tokens || 0,
+      screenshotUrl,
+      screenshotFileName: fileName,
       status: 'pending', // pending, approved, rejected
       submittedAt: admin.database.ServerValue.TIMESTAMP,
-      submittedDate: new Date().toISOString()
+      submittedDate: new Date().toISOString(),
+      type: 'token_purchase'
     };
 
-    // Generate unique request ID
-    const requestRef = db.ref('tokenRequests').push();
-    const requestId = requestRef.key;
-
     // Store in tokenRequests collection
-    await requestRef.set(requestData);
+    await db.ref(`tokenRequests/${requestId}`).set(requestData);
 
     // Also store reference in user's token request history
     await db.ref(`Users/${userKey}/tokenRequestHistory/${requestId}`).set({
-      paymentId,
+      transactionId: transactionId || 'N/A',
       requestedTokens: parseInt(requestedTokens),
       netTokens: parseFloat(netTokens),
       amountPaid: parseFloat(amountPaid),
+      screenshotUrl,
       status: 'pending',
       submittedAt: admin.database.ServerValue.TIMESTAMP,
-      submittedDate: new Date().toISOString()
+      submittedDate: new Date().toISOString(),
+      type: 'token_purchase'
     });
 
     res.json({
       success: true,
-      message: "Token request submitted successfully. Admin will verify your payment within 4-24 hours.",
+      message: "Token request submitted successfully. Admin team will update tokens within 4 to 24 hours. Please check request status in previous requests page.",
       requestId
     });
 
@@ -5101,12 +5180,15 @@ app.post('/api/submit-token-request', async (req, res) => {
   }
 });
 
+
+
+
 // ✅ Normal Admin API to approve and process token requests
 app.post('/api/admin/update-tokens', async (req, res) => {
   try {
     console.log('Received request body:', req.body);
 
-    const { userId, requestId, tokensToAdd, paymentId } = req.body;
+    const { userId, requestId, tokensToAdd, paymentId, amountPaid, requestedTokens, netTokens, gstAmount, gatewayFee } = req.body;
 
     if (!userId || !requestId || !tokensToAdd || !paymentId) {
       console.error('Missing fields:', { userId, requestId, tokensToAdd, paymentId });
@@ -5116,7 +5198,10 @@ app.post('/api/admin/update-tokens', async (req, res) => {
       });
     }
 
-    // ===== 1. Fetch token request =====
+    // ===== 1. Generate unique order ID =====
+    const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // ===== 2. Fetch token request =====
     const requestRef = db.ref(`tokenRequests/${requestId}`);
     const requestSnap = await requestRef.once('value');
     if (!requestSnap.exists()) {
@@ -5132,7 +5217,7 @@ app.post('/api/admin/update-tokens', async (req, res) => {
       });
     }
 
-    // ===== 2. Fetch user =====
+    // ===== 3. Fetch user =====
     const userRef = db.ref(`Users/${userId}`);
     const userSnap = await userRef.once('value');
     if (!userSnap.exists()) {
@@ -5141,90 +5226,102 @@ app.post('/api/admin/update-tokens', async (req, res) => {
     const userData = userSnap.val();
 
     // Check duplicate payment
-    const userOrderRef = db.ref(`Users/${userId}/orders/${paymentId}`);
+    const userOrderRef = db.ref(`Users/${userId}/orders/${orderId}`);
     const userOrderSnap = await userOrderRef.once('value');
     if (userOrderSnap.exists()) {
       return res.status(400).json({ success: false, error: "Order already processed for this user" });
     }
 
-    // ===== 3. Compute tokens and tax =====
-    const amountPaid = parseFloat(requestData.amountPaid);
-    const taxAmount = +(amountPaid * 0.28).toFixed(2);
+    // ===== 4. Compute tokens and tax =====
+    const paidAmount = parseFloat(amountPaid || requestData.amountPaid);
+    const taxAmount = +(paidAmount * 0.28).toFixed(2);
     const creditedTokens = parseFloat(tokensToAdd);
     const newTokenBalance = (userData.tokens || 0) + creditedTokens;
 
-    // ===== 4. Update user's token balance =====
+    // ===== 5. Update user's token balance =====
     await userRef.update({
       tokens: newTokenBalance,
       lastTokenAddition: {
-        amountPaid,
+        amountPaid: paidAmount,
         taxAmount,
         creditedTokens,
         taxRate: "28%",
-        orderId: paymentId,
+        orderId: orderId,
         requestId,
         timestamp: admin.database.ServerValue.TIMESTAMP
       }
     });
 
-    // ===== 5. Save order inside user orders =====
+    // ===== 6. Save order inside user orders =====
     await userOrderRef.set({
+      orderId: orderId,
       type: "tokens",
-      amountPaid,
+      amountPaid: paidAmount,
       taxAmount,
       creditedTokens,
       taxRate: "28%",
-      requestedTokens: requestData.requestedTokens,
-      netTokens: requestData.netTokens,
-      gstAmount: requestData.gstAmount || 0,
-      gatewayFee: requestData.gatewayFee || 0,
+      requestedTokens: requestedTokens || requestData.requestedTokens,
+      netTokens: netTokens || requestData.netTokens,
+      gstAmount: gstAmount || requestData.gstAmount || 0,
+      gatewayFee: gatewayFee || requestData.gatewayFee || 0,
       status: "paid",
       processedAt: admin.database.ServerValue.TIMESTAMP,
       approvedBy: "admin",
-      requestId
+      requestId: requestId,
+      paymentId: paymentId,
+      userId: userId,
+      userName: userData.name || 'N/A',
+      userPhone: userData.phoneNo || 'N/A',
+      userEmail: userData.email || 'N/A'
     });
 
-    // ===== 6. Save in main orders collection =====
-    await db.ref(`orders/${paymentId}`).set({
+    // ===== 7. Save in main orders collection =====
+    await db.ref(`orders/${orderId}`).set({
+      orderId: orderId,
       userId,
       phoneNo: userData.phoneNo,
       userName: userData.name || 'N/A',
       userEmail: userData.email || 'N/A',
       type: "tokens",
-      amountPaid,
+      amountPaid: paidAmount,
       taxRate: "28%",
       taxAmount,
-      creditedAmount: creditedTokens,
-      requestedTokens: requestData.requestedTokens,
-      netTokens: requestData.netTokens,
-      gstAmount: requestData.gstAmount || 0,
-      gatewayFee: requestData.gatewayFee || 0,
+      creditedTokens: creditedTokens,
+      requestedTokens: requestedTokens || requestData.requestedTokens,
+      netTokens: netTokens || requestData.netTokens,
+      gstAmount: gstAmount || requestData.gstAmount || 0,
+      gatewayFee: gatewayFee || requestData.gatewayFee || 0,
       status: "paid",
-      taxDate: admin.database.ServerValue.TIMESTAMP,
       processedAt: admin.database.ServerValue.TIMESTAMP,
-      requestId
+      approvedBy: "admin",
+      requestId: requestId,
+      paymentId: paymentId,
+      screenshotUrl: requestData.screenshotUrl || null,
+      submittedAt: requestData.submittedAt || admin.database.ServerValue.TIMESTAMP
     });
 
-    // ===== 7. Update token request status =====
+    // ===== 8. Update token request status =====
     await requestRef.update({
       status: 'approved',
       approvedAt: admin.database.ServerValue.TIMESTAMP,
       approvedDate: new Date().toISOString(),
       tokensAdded: creditedTokens,
       taxAmount,
-      processedBy: "admin"
+      processedBy: "admin",
+      orderId: orderId
     });
 
-    // ===== 8. Update user's token request history =====
+    // ===== 9. Update user's token request history =====
     await db.ref(`Users/${userId}/tokenRequestHistory/${requestId}`).update({
       status: 'approved',
       approvedAt: admin.database.ServerValue.TIMESTAMP,
       approvedDate: new Date().toISOString(),
       tokensAdded: creditedTokens,
-      taxAmount
+      taxAmount,
+      orderId: orderId
     });
 
-    // ===== 9. Final Response =====
+    // ===== 10. Final Response =====
     return res.status(200).json({
       success: true,
       message: "Tokens updated successfully",
@@ -5232,7 +5329,7 @@ app.post('/api/admin/update-tokens', async (req, res) => {
         tokens: newTokenBalance,
         tokensAdded: creditedTokens,
         taxAmount,
-        orderId: paymentId,
+        orderId: orderId,
         requestId
       }
     });
@@ -5246,8 +5343,7 @@ app.post('/api/admin/update-tokens', async (req, res) => {
   }
 });
 
-
-// Optional: API to reject a token request
+// API to reject a token request
 app.post('/api/admin/reject-token-request', async (req, res) => {
   const { userId, requestId, reason } = req.body;
 
@@ -5313,16 +5409,43 @@ app.post('/api/admin/reject-token-request', async (req, res) => {
 
 
 
+// ✅ GET API to fetch all token requests
+app.get("/api/get-add-token-requests", async (req, res) => {
+  try {
+    // Correct Firebase reference
+    const ref = db.ref("tokenRequests");
 
+    // Fetch data
+    const snapshot = await ref.once("value");
 
+    if (!snapshot.exists()) {
+      return res.status(404).json({
+        success: false,
+        message: "No token requests found",
+      });
+    }
 
+    const data = snapshot.val();
 
+    // Convert to array
+    const formattedData = Object.entries(data).map(([key, value]) => ({
+      id: key,
+      ...value,
+    }));
 
-
-
-
-
-
+    res.status(200).json({
+      success: true,
+      total: formattedData.length,
+      requests: formattedData,
+    });
+  } catch (error) {
+    console.error("Error fetching token requests:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+    });
+  }
+});
 
 
 
@@ -5533,7 +5656,7 @@ app.post('/api/verify-banking-detail', async (req, res) => {
 
 
 
-//Withdraw apis
+// Withdraw API
 app.post("/api/request-withdrawal", async (req, res) => {
   try {
     const { phoneNo, tokens, method } = req.body;
@@ -5567,8 +5690,8 @@ app.post("/api/request-withdrawal", async (req, res) => {
       return res.status(400).json({ error: "Insufficient tokens" });
     }
 
-    // 🔹 Calculate tax (30%) and final withdrawal
-    const tax = Math.floor(tokens * 0.3);
+    // 🔹 Calculate tax (28%) and final withdrawal
+    const tax = Math.floor(tokens * 0.28);
     const amountAfterTax = tokens - tax;
 
     // 🔹 Deduct tokens from user balance
@@ -5623,6 +5746,7 @@ app.post("/api/request-withdrawal", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 //Admin 
 app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
