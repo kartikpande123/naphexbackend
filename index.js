@@ -5875,6 +5875,104 @@ app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
 
 
 
+//root user creation api 
+// app.post("/api/createRootUser", async (req, res) => {
+//   try {
+//     const { name, phoneNo, password, city, state, email } = req.body;
+
+//     if (!name || !phoneNo || !password || !city || !state) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Missing required fields: name, phoneNo, password, city, state"
+//       });
+//     }
+
+//     // Generate IDs
+//     const userId = "USER" + Math.random().toString(36).substring(2, 12).toUpperCase();
+//     const myrefrelid = "REFI" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+//     // Hash password
+//     const hashedPassword = await bcrypt.hash(password, 10);
+
+//     // Create user in Firebase Authentication
+//     const userRecord = await firebaseAdmin.auth().createUser({
+//       phoneNumber: `+91${phoneNo}`,
+//       password: password,
+//       displayName: name,
+//       email: email || undefined,
+//     });
+
+//     const createdAt = new Date().toISOString();
+//     const updatedAt = createdAt;
+
+//     // Save in /Users
+//     const dbRef = firebaseAdmin.database();
+//     const userPath = "user-1";
+
+//     const userData = {
+//       id: "RootId",
+//       name,
+//       phoneNo,
+//       email: email || null,
+//       password: hashedPassword,
+//       city,
+//       state,
+//       tokens: 200,
+//       status: "active",
+//       blocked: false,
+//       createdAt,
+//       updatedAt
+//     };
+
+//     await dbRef.ref(`/Users/${userPath}`).set(userData);
+
+//     const userIdsData = {
+//       myuserid: userId,
+//       myrefrelid: myrefrelid
+//     };
+//     await dbRef.ref(`/Users/${userPath}/userIds`).set(userIdsData);
+
+//     // Save in /binaryUsers
+//     const binaryData = {
+//       name,
+//       myrefrelid,
+//       leftChild: null,
+//       rightChild: null,
+//       Root: "RootId",
+//       carryForward: {},
+//     };
+//     await dbRef.ref(`/binaryUsers/${userId}`).set(binaryData);
+
+//     // Optional custom token
+//     const customToken = await firebaseAdmin.auth().createCustomToken(userRecord.uid);
+
+//     res.status(201).json({
+//       success: true,
+//       message: "Root user created successfully (with Firebase Auth entry)",
+//       authUid: userRecord.uid,
+//       customToken,
+//       userData: {
+//         userPath,
+//         ...userData,
+//         userIds: userIdsData
+//       },
+//       binaryData: {
+//         userId,
+//         ...binaryData
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error creating root user:", error);
+//     res.status(500).json({
+//       success: false,
+//       error: error.message
+//     });
+//   }
+// });
+
+
+
 //Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
