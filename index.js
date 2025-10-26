@@ -5690,8 +5690,8 @@ app.post("/api/request-withdrawal", async (req, res) => {
       return res.status(400).json({ error: "Insufficient tokens" });
     }
 
-    // 🔹 Calculate tax (28%) and final withdrawal
-    const tax = Math.floor(tokens * 0.28);
+    // 🔹 Calculate tax (30%) and final withdrawal
+    const tax = Math.floor(tokens * 0.3);
     const amountAfterTax = tokens - tax;
 
     // 🔹 Deduct tokens from user balance
@@ -5747,8 +5747,7 @@ app.post("/api/request-withdrawal", async (req, res) => {
   }
 });
 
-
-//Admin 
+// Admin API
 app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
   try {
     const { userId, withdrawalId } = req.params;
@@ -5806,6 +5805,7 @@ app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
 
 app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
     try {
