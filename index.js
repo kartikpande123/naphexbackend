@@ -5874,7 +5874,6 @@ app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
 
 
 
-
 //root user creation api 
 // app.post("/api/createRootUser", async (req, res) => {
 //   try {
@@ -5970,6 +5969,144 @@ app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
 //     });
 //   }
 // });
+
+
+
+//APis for deleting user
+// API: Delete a user completely (Admin triggered)
+app.delete('/api/admin/delete-user/:userIdentifier', async (req, res) => {
+  try {
+    const { userIdentifier } = req.params;
+
+    if (!userIdentifier) {
+      return res.status(400).json({ success: false, message: 'User identifier is required' });
+    }
+
+    const usersRef = db.ref('Users');
+    const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
+
+    if (!snapshot.exists()) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const userKey = Object.keys(snapshot.val())[0];
+    const userRef = usersRef.child(userKey);
+    const userData = snapshot.val()[userKey];
+    const userIdsData = userData.userIds || {};
+    const kycData = userData.kyc || {};
+    const bucket = firebaseAdmin.storage().bucket();
+
+    // 🔹 1. Delete KYC Documents
+    const deleteFile = async (url, label) => {
+      try {
+        if (!url) return;
+        let filePath = '';
+
+        if (url.includes('/o/')) {
+          filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
+        } else if (url.includes('/naphex-game.firebasestorage.app/')) {
+          const parts = url.split('/naphex-game.firebasestorage.app/');
+          if (parts.length > 1) filePath = parts[1];
+        }
+
+        if (filePath) {
+          await bucket.file(filePath).delete();
+          console.log(`✅ Deleted ${label}: ${filePath}`);
+        }
+      } catch (err) {
+        console.error(`❌ Error deleting ${label}:`, err.message);
+      }
+    };
+
+    await Promise.all([
+      deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
+      deleteFile(kycData.panCardUrl, 'panCardUrl'),
+      deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl'),
+      deleteFile(kycData.selfieUrl, 'selfieUrl'),
+    ]);
+
+    // 🔹 2. Remove user from binaryUsers
+    if (userIdsData.myrefrelid) {
+      const binaryUsersRef = db.ref('binaryUsers');
+      const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
+
+      if (binarySnapshot.exists()) {
+        const binaryKey = Object.keys(binarySnapshot.val())[0];
+        const binaryData = binarySnapshot.val()[binaryKey];
+
+        if (binaryData.referralId) {
+          const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
+          const parentSnap = await parentRef.once('value');
+          const parentData = parentSnap.val();
+
+          if (parentData) {
+            const updates = {};
+            if (parentData.leftChild === binaryKey) updates.leftChild = null;
+            if (parentData.rightChild === binaryKey) updates.rightChild = null;
+            if (Object.keys(updates).length) await parentRef.update(updates);
+          }
+        }
+
+        await binaryUsersRef.child(binaryKey).remove();
+        console.log('✅ Removed user from binaryUsers');
+      }
+    }
+
+    // 🔹 3. Delete Auth account
+    try {
+      let authUser = null;
+      if (userData.phoneNo) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
+        } catch {}
+      }
+      if (!authUser && userData.email) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
+        } catch {}
+      }
+
+      if (authUser) {
+        await firebaseAdmin.auth().deleteUser(authUser.uid);
+        console.log(`✅ Deleted Firebase Auth user: ${authUser.uid}`);
+      }
+    } catch (err) {
+      console.error('❌ Firebase Auth deletion error:', err.message);
+    }
+
+    // 🔹 4. Delete User Node
+    await userRef.remove();
+    console.log(`✅ Removed user data from Users: ${userKey}`);
+
+    // 🔹 5. (Optional) Log in deletedusers
+    const deletedLogRef = db.ref('deletedusers').push();
+    await deletedLogRef.set({
+      userId: userIdentifier,
+      name: userData.name || 'N/A',
+      phoneNo: userData.phoneNo || 'N/A',
+      email: userData.email || 'N/A',
+      deletedAt: new Date().toISOString(),
+      deletedBy: 'admin',
+    });
+
+    return res.json({
+      success: true,
+      message: `User ${userIdentifier} deleted successfully.`,
+      data: {
+        userKey,
+        deletedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('❌ Delete user error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete user completely',
+      error: error.message,
+    });
+  }
+});
+
 
 
 
