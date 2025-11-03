@@ -5960,140 +5960,417 @@ app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
 
 //APis for deleting user
 // API: Delete a user completely (Admin triggered)
-app.delete('/api/admin/delete-user/:userIdentifier', async (req, res) => {
-  try {
-    const { userIdentifier } = req.params;
+// app.delete('/api/admin/delete-user/:userIdentifier', async (req, res) => {
+//   try {
+//     const { userIdentifier } = req.params;
 
-    if (!userIdentifier) {
-      return res.status(400).json({ success: false, message: 'User identifier is required' });
+//     if (!userIdentifier) {
+//       return res.status(400).json({ success: false, message: 'User identifier is required' });
+//     }
+
+//     const usersRef = db.ref('Users');
+//     const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
+
+//     if (!snapshot.exists()) {
+//       return res.status(404).json({ success: false, message: 'User not found' });
+//     }
+
+//     const userKey = Object.keys(snapshot.val())[0];
+//     const userRef = usersRef.child(userKey);
+//     const userData = snapshot.val()[userKey];
+//     const userIdsData = userData.userIds || {};
+//     const kycData = userData.kyc || {};
+//     const bucket = firebaseAdmin.storage().bucket();
+
+//     // 🔹 1. Delete KYC Documents
+//     const deleteFile = async (url, label) => {
+//       try {
+//         if (!url) return;
+//         let filePath = '';
+
+//         if (url.includes('/o/')) {
+//           filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
+//         } else if (url.includes('/naphex-game.firebasestorage.app/')) {
+//           const parts = url.split('/naphex-game.firebasestorage.app/');
+//           if (parts.length > 1) filePath = parts[1];
+//         }
+
+//         if (filePath) {
+//           await bucket.file(filePath).delete();
+//           console.log(`✅ Deleted ${label}: ${filePath}`);
+//         }
+//       } catch (err) {
+//         console.error(`❌ Error deleting ${label}:`, err.message);
+//       }
+//     };
+
+//     await Promise.all([
+//       deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
+//       deleteFile(kycData.panCardUrl, 'panCardUrl'),
+//       deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl'),
+//       deleteFile(kycData.selfieUrl, 'selfieUrl'),
+//     ]);
+
+//     // 🔹 2. Remove user from binaryUsers
+//     if (userIdsData.myrefrelid) {
+//       const binaryUsersRef = db.ref('binaryUsers');
+//       const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
+
+//       if (binarySnapshot.exists()) {
+//         const binaryKey = Object.keys(binarySnapshot.val())[0];
+//         const binaryData = binarySnapshot.val()[binaryKey];
+
+//         if (binaryData.referralId) {
+//           const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
+//           const parentSnap = await parentRef.once('value');
+//           const parentData = parentSnap.val();
+
+//           if (parentData) {
+//             const updates = {};
+//             if (parentData.leftChild === binaryKey) updates.leftChild = null;
+//             if (parentData.rightChild === binaryKey) updates.rightChild = null;
+//             if (Object.keys(updates).length) await parentRef.update(updates);
+//           }
+//         }
+
+//         await binaryUsersRef.child(binaryKey).remove();
+//         console.log('✅ Removed user from binaryUsers');
+//       }
+//     }
+
+//     // 🔹 3. Delete Auth account
+//     try {
+//       let authUser = null;
+//       if (userData.phoneNo) {
+//         try {
+//           authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
+//         } catch {}
+//       }
+//       if (!authUser && userData.email) {
+//         try {
+//           authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
+//         } catch {}
+//       }
+
+//       if (authUser) {
+//         await firebaseAdmin.auth().deleteUser(authUser.uid);
+//         console.log(`✅ Deleted Firebase Auth user: ${authUser.uid}`);
+//       }
+//     } catch (err) {
+//       console.error('❌ Firebase Auth deletion error:', err.message);
+//     }
+
+//     // 🔹 4. Delete User Node
+//     await userRef.remove();
+//     console.log(`✅ Removed user data from Users: ${userKey}`);
+
+//     // 🔹 5. (Optional) Log in deletedusers
+//     const deletedLogRef = db.ref('deletedusers').push();
+//     await deletedLogRef.set({
+//       userId: userIdentifier,
+//       name: userData.name || 'N/A',
+//       phoneNo: userData.phoneNo || 'N/A',
+//       email: userData.email || 'N/A',
+//       deletedAt: new Date().toISOString(),
+//       deletedBy: 'admin',
+//     });
+
+//     return res.json({
+//       success: true,
+//       message: `User ${userIdentifier} deleted successfully.`,
+//       data: {
+//         userKey,
+//         deletedAt: new Date().toISOString(),
+//       },
+//     });
+//   } catch (error) {
+//     console.error('❌ Delete user error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Failed to delete user completely',
+//       error: error.message,
+//     });
+//   }
+// });
+
+
+//Api add user bank details from bank details component (Bank passbook image and cancelled check image)
+
+// Add this API endpoint to your backend server
+
+app.post("/api/banking/upload-documents", upload.fields([
+    { name: 'passbookPhoto', maxCount: 1 },
+    { name: 'cancelledChequePhoto', maxCount: 1 }
+]), async (req, res) => {
+    const { phoneNo } = req.body;
+
+    // Validate required fields
+    if (!phoneNo) {
+        return res.status(400).json({
+            success: false,
+            error: "Phone number is required"
+        });
     }
 
-    const usersRef = db.ref('Users');
-    const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
-
-    if (!snapshot.exists()) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    // Validate that at least one file is uploaded
+    if (!req.files || (!req.files.passbookPhoto && !req.files.cancelledChequePhoto)) {
+        return res.status(400).json({
+            success: false,
+            error: 'At least one document (passbook or cancelled cheque) is required'
+        });
     }
 
-    const userKey = Object.keys(snapshot.val())[0];
-    const userRef = usersRef.child(userKey);
-    const userData = snapshot.val()[userKey];
-    const userIdsData = userData.userIds || {};
-    const kycData = userData.kyc || {};
-    const bucket = firebaseAdmin.storage().bucket();
-
-    // 🔹 1. Delete KYC Documents
-    const deleteFile = async (url, label) => {
-      try {
-        if (!url) return;
-        let filePath = '';
-
-        if (url.includes('/o/')) {
-          filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
-        } else if (url.includes('/naphex-game.firebasestorage.app/')) {
-          const parts = url.split('/naphex-game.firebasestorage.app/');
-          if (parts.length > 1) filePath = parts[1];
-        }
-
-        if (filePath) {
-          await bucket.file(filePath).delete();
-          console.log(`✅ Deleted ${label}: ${filePath}`);
-        }
-      } catch (err) {
-        console.error(`❌ Error deleting ${label}:`, err.message);
-      }
-    };
-
-    await Promise.all([
-      deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
-      deleteFile(kycData.panCardUrl, 'panCardUrl'),
-      deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl'),
-      deleteFile(kycData.selfieUrl, 'selfieUrl'),
-    ]);
-
-    // 🔹 2. Remove user from binaryUsers
-    if (userIdsData.myrefrelid) {
-      const binaryUsersRef = db.ref('binaryUsers');
-      const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
-
-      if (binarySnapshot.exists()) {
-        const binaryKey = Object.keys(binarySnapshot.val())[0];
-        const binaryData = binarySnapshot.val()[binaryKey];
-
-        if (binaryData.referralId) {
-          const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
-          const parentSnap = await parentRef.once('value');
-          const parentData = parentSnap.val();
-
-          if (parentData) {
-            const updates = {};
-            if (parentData.leftChild === binaryKey) updates.leftChild = null;
-            if (parentData.rightChild === binaryKey) updates.rightChild = null;
-            if (Object.keys(updates).length) await parentRef.update(updates);
-          }
-        }
-
-        await binaryUsersRef.child(binaryKey).remove();
-        console.log('✅ Removed user from binaryUsers');
-      }
-    }
-
-    // 🔹 3. Delete Auth account
     try {
-      let authUser = null;
-      if (userData.phoneNo) {
-        try {
-          authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
-        } catch {}
-      }
-      if (!authUser && userData.email) {
-        try {
-          authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
-        } catch {}
-      }
+        const dbRef = firebaseAdmin.database();
+        const usersRef = dbRef.ref('/Users');
 
-      if (authUser) {
-        await firebaseAdmin.auth().deleteUser(authUser.uid);
-        console.log(`✅ Deleted Firebase Auth user: ${authUser.uid}`);
-      }
-    } catch (err) {
-      console.error('❌ Firebase Auth deletion error:', err.message);
+        // Find user by phone number
+        const snapshot = await usersRef.orderByChild('phoneNo').equalTo(phoneNo).once('value');
+        
+        if (!snapshot.exists()) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        let userPath = null;
+        snapshot.forEach((childSnapshot) => {
+            userPath = childSnapshot.key;
+        });
+
+        if (!userPath) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        // Upload documents to storage
+        const documentUrls = {};
+        const folderPath = `kyc-documents/${userPath}`;
+
+        try {
+            // Upload bank passbook if provided
+            if (req.files.passbookPhoto && req.files.passbookPhoto[0]) {
+                const passbookFile = req.files.passbookPhoto[0];
+                const passbookFileName = `passbook_ingame_${Date.now()}_${path.extname(passbookFile.originalname)}`;
+                documentUrls.bankPassbookUrlByInGame = await uploadFileToStorage(passbookFile, passbookFileName, folderPath);
+            }
+
+            // Upload cancelled cheque if provided
+            if (req.files.cancelledChequePhoto && req.files.cancelledChequePhoto[0]) {
+                const chequeFile = req.files.cancelledChequePhoto[0];
+                const chequeFileName = `cancelledCheque_ingame_${Date.now()}_${path.extname(chequeFile.originalname)}`;
+                documentUrls.cancelledChequeUrlByInGame = await uploadFileToStorage(chequeFile, chequeFileName, folderPath);
+            }
+        } catch (uploadError) {
+            console.error('Error uploading bank documents:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload bank documents.',
+                error: uploadError.message,
+            });
+        }
+
+        // Get existing KYC data
+        const kycRef = dbRef.ref(`/Users/${userPath}/kyc`);
+        const kycSnapshot = await kycRef.once('value');
+        const existingKyc = kycSnapshot.val() || {};
+
+        // Update KYC with new document URLs
+        const updatedAt = new Date().toISOString();
+        const kycUpdates = {
+            ...documentUrls,
+            bankDocumentsUploadedAt: updatedAt,
+        };
+
+        await kycRef.update(kycUpdates);
+
+        res.status(200).json({
+            success: true,
+            message: "Bank documents uploaded successfully",
+            data: {
+                userPath,
+                documentsUploaded: {
+                    bankPassbook: !!documentUrls.bankPassbookUrlByInGame,
+                    cancelledCheque: !!documentUrls.cancelledChequeUrlByInGame,
+                },
+                urls: documentUrls,
+                uploadedAt: updatedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('Error uploading bank documents:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to upload bank documents.',
+            error: error.message,
+        });
     }
-
-    // 🔹 4. Delete User Node
-    await userRef.remove();
-    console.log(`✅ Removed user data from Users: ${userKey}`);
-
-    // 🔹 5. (Optional) Log in deletedusers
-    const deletedLogRef = db.ref('deletedusers').push();
-    await deletedLogRef.set({
-      userId: userIdentifier,
-      name: userData.name || 'N/A',
-      phoneNo: userData.phoneNo || 'N/A',
-      email: userData.email || 'N/A',
-      deletedAt: new Date().toISOString(),
-      deletedBy: 'admin',
-    });
-
-    return res.json({
-      success: true,
-      message: `User ${userIdentifier} deleted successfully.`,
-      data: {
-        userKey,
-        deletedAt: new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    console.error('❌ Delete user error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to delete user completely',
-      error: error.message,
-    });
-  }
 });
 
+//Admin apis to accept reject kyc images from in game
 
+// API endpoint to verify or reject KYC bank images
+app.post("/api/verify-kyc-bank-images", async (req, res) => {
+    const { userId, action } = req.body;
+
+    // Validate required fields
+    if (!userId || !action) {
+        return res.status(400).json({
+            success: false,
+            error: "userId and action are required"
+        });
+    }
+
+    // Validate action value
+    if (action !== 'verify' && action !== 'reject') {
+        return res.status(400).json({
+            success: false,
+            error: "Action must be either 'verify' or 'reject'"
+        });
+    }
+
+    try {
+        const dbRef = firebaseAdmin.database();
+        const userKycRef = dbRef.ref(`/Users/${userId}/kyc`);
+
+        // Get existing KYC data
+        const kycSnapshot = await userKycRef.once('value');
+        const kycData = kycSnapshot.val();
+
+        if (!kycData) {
+            return res.status(404).json({
+                success: false,
+                error: 'KYC data not found for this user'
+            });
+        }
+
+        // Check if bank documents exist
+        if (!kycData.bankPassbookUrlByInGame && !kycData.cancelledChequeUrlByInGame) {
+            return res.status(404).json({
+                success: false,
+                error: 'No bank documents found to verify/reject'
+            });
+        }
+
+        if (action === 'verify') {
+            // Accept the KYC documents
+            const updatedAt = new Date().toISOString();
+            
+            await userKycRef.update({
+                bankDocumentsStatus: 'verified',
+                kycDetailsByInGame: 'accepted',
+                bankDocumentsVerifiedAt: updatedAt
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: 'KYC bank images verified successfully',
+                data: {
+                    userId,
+                    status: 'verified',
+                    verifiedAt: updatedAt
+                }
+            });
+
+        } else if (action === 'reject') {
+            // Reject and delete the documents
+            
+            // Helper function to delete file from storage using full URL
+            const deleteFileFromStorage = async (fileUrl) => {
+                if (!fileUrl) return;
+                
+                try {
+                    const bucket = firebaseAdmin.storage().bucket();
+                    
+                    // Extract the file path from the full URL
+                    // Example URL: https://storage.googleapis.com/naphex-game.firebasestorage.app/kyc-documents/user-1/passbook_ingame_1762156827148_.png
+                    
+                    let filePath = '';
+                    
+                    if (fileUrl.includes('storage.googleapis.com')) {
+                        // Split by the domain and get everything after it
+                        const urlParts = fileUrl.split('storage.googleapis.com/')[1];
+                        if (urlParts) {
+                            // Remove bucket name and get the path
+                            const pathParts = urlParts.split('/');
+                            // Skip the bucket name (first part) and join the rest
+                            filePath = pathParts.slice(1).join('/');
+                        }
+                    } else if (fileUrl.includes('firebasestorage.googleapis.com')) {
+                        // Alternative Firebase Storage URL format
+                        const match = fileUrl.match(/\/o\/(.+?)\?/);
+                        if (match && match[1]) {
+                            filePath = decodeURIComponent(match[1]);
+                        }
+                    }
+                    
+                    if (!filePath) {
+                        console.error('Could not extract file path from URL:', fileUrl);
+                        return;
+                    }
+                    
+                    console.log(`Attempting to delete file: ${filePath}`);
+                    
+                    const file = bucket.file(filePath);
+                    const [exists] = await file.exists();
+                    
+                    if (exists) {
+                        await file.delete();
+                        console.log(`Successfully deleted file: ${filePath}`);
+                    } else {
+                        console.log(`File does not exist: ${filePath}`);
+                    }
+                } catch (error) {
+                    console.error('Error deleting file from storage:', error);
+                    // Don't throw error, continue with database update
+                }
+            };
+
+            // Delete both documents from storage if they exist
+            if (kycData.bankPassbookUrlByInGame) {
+                await deleteFileFromStorage(kycData.bankPassbookUrlByInGame);
+            }
+            
+            if (kycData.cancelledChequeUrlByInGame) {
+                await deleteFileFromStorage(kycData.cancelledChequeUrlByInGame);
+            }
+
+            // Remove the document URLs and status from database
+            const updatedAt = new Date().toISOString();
+            
+            await userKycRef.update({
+                bankPassbookUrlByInGame: null,
+                cancelledChequeUrlByInGame: null,
+                bankDocumentsStatus: 'rejected',
+                kycDetailsByInGame: 'rejected',
+                bankDocumentsRejectedAt: updatedAt,
+                bankDocumentsUploadedAt: null
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: 'KYC bank images rejected and deleted successfully',
+                data: {
+                    userId,
+                    status: 'rejected',
+                    rejectedAt: updatedAt
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Error processing KYC bank images:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process KYC bank images',
+            error: error.message
+        });
+    }
+});
 
 
 //Server
