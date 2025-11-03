@@ -2839,29 +2839,31 @@ const uploadFileToStorage = async (file, fileName, folderPath) => {
 app.post("/api/registerUser", upload.fields([
     { name: 'aadharCard', maxCount: 1 },
     { name: 'panCard', maxCount: 1 },
-    { name: 'bankPassbook', maxCount: 1 }, // optional now
+    { name: 'bankPassbook', maxCount: 1 }, // optional
+    { name: 'cancelledCheque', maxCount: 1 }, // new optional field
     { name: 'selfie', maxCount: 1 }
 ]), async (req, res) => {
-    const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state } = req.body;
+    const { userId, name, referralId, myrefrelid, phoneNo, email, password, city, state, panNumber } = req.body;
 
-    // Validate required fields
-    if (!userId || !name || !myrefrelid || !phoneNo || !password || !city || !state) {
+    // Validate required fields (added panNumber)
+    if (!userId || !name || !myrefrelid || !phoneNo || !password || !city || !state || !panNumber) {
         return res.status(400).json({
             success: false,
-            error: "Missing required fields: userId, name, myrefrelid, phoneNo, password, city, state"
+            error: "Missing required fields: userId, name, myrefrelid, phoneNo, password, city, state, panNumber"
         });
     }
 
-    // Validate mandatory KYC files (bankPassbook optional now)
+    // Validate mandatory KYC files (bankPassbook & cancelledCheque optional)
     if (!req.files || !req.files.aadharCard || !req.files.panCard || !req.files.selfie) {
         return res.status(400).json({
             success: false,
-            error: 'Required KYC documents: aadharCard, panCard, selfie. (bankPassbook optional)'
+            error: 'Required KYC documents: aadharCard, panCard, selfie. (bankPassbook & cancelledCheque optional)'
         });
     }
 
     try {
         // ============ BINARY USER REGISTRATION LOGIC ============
+
         const binaryUsersRef = db.ref("binaryUsers");
         const usersSnapshot = await binaryUsersRef.once("value");
 
@@ -2931,6 +2933,7 @@ app.post("/api/registerUser", upload.fields([
         await db.ref().update(binaryUpdates);
 
         // ============ REGULAR USER CREATION LOGIC ============
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const userRecord = await firebaseAdmin.auth().createUser({
@@ -2975,11 +2978,18 @@ app.post("/api/registerUser", upload.fields([
                 kycImages.panCardUrl = await uploadFileToStorage(panFile, panFileName, folderPath);
             }
 
-            // Bank passbook is optional
+            // Bank passbook optional
             if (req.files.bankPassbook && req.files.bankPassbook[0]) {
                 const passbookFile = req.files.bankPassbook[0];
                 const passbookFileName = `passbook_${Date.now()}_${path.extname(passbookFile.originalname)}`;
                 kycImages.bankPassbookUrl = await uploadFileToStorage(passbookFile, passbookFileName, folderPath);
+            }
+
+            // Cancelled cheque optional
+            if (req.files.cancelledCheque && req.files.cancelledCheque[0]) {
+                const chequeFile = req.files.cancelledCheque[0];
+                const chequeFileName = `cancelledCheque_${Date.now()}_${path.extname(chequeFile.originalname)}`;
+                kycImages.cancelledChequeUrl = await uploadFileToStorage(chequeFile, chequeFileName, folderPath);
             }
 
             if (req.files.selfie && req.files.selfie[0]) {
@@ -3005,6 +3015,7 @@ app.post("/api/registerUser", upload.fields([
             tokens: 200,
             city,
             state,
+            panNumber, // new field added
             createdAt,
             kycStatus: 'submitted',
             kycSubmittedAt: createdAt,
@@ -3022,7 +3033,8 @@ app.post("/api/registerUser", upload.fields([
         const kycData = {
             aadharCardUrl: kycImages.aadharCardUrl || null,
             panCardUrl: kycImages.panCardUrl || null,
-            bankPassbookUrl: kycImages.bankPassbookUrl || null, // may be null
+            bankPassbookUrl: kycImages.bankPassbookUrl || null,
+            cancelledChequeUrl: kycImages.cancelledChequeUrl || null, // new optional field
             selfieUrl: kycImages.selfieUrl || null,
             status: 'submitted',
             submittedAt: createdAt,
@@ -3037,7 +3049,7 @@ app.post("/api/registerUser", upload.fields([
 
         res.status(201).json({
             success: true,
-            message: "User registered successfully (bank passbook optional)",
+            message: "User registered successfully (bank passbook & cancelled cheque optional)",
             binaryData: {
                 userId,
                 referralId: referrerUserId || null,
@@ -3054,6 +3066,7 @@ app.post("/api/registerUser", upload.fields([
                 tokens: 200,
                 city,
                 state,
+                panNumber,
                 createdAt,
                 kycStatus: 'submitted',
             },
@@ -3065,6 +3078,7 @@ app.post("/api/registerUser", upload.fields([
                     aadharCard: !!kycImages.aadharCardUrl,
                     panCard: !!kycImages.panCardUrl,
                     bankPassbook: !!kycImages.bankPassbookUrl,
+                    cancelledCheque: !!kycImages.cancelledChequeUrl,
                     selfie: !!kycImages.selfieUrl,
                 }
             }
@@ -3087,6 +3101,7 @@ app.post("/api/registerUser", upload.fields([
         });
     }
 });
+
 
 
 //Binary refrelid exist check api (signup)
