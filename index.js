@@ -6373,6 +6373,51 @@ app.post("/api/verify-kyc-bank-images", async (req, res) => {
 });
 
 
+//APi to get software tutorial videos
+// Get all tutorial videos
+app.get('/api/tutorials', async (req, res) => {
+  try {
+    const [files] = await bucket.getFiles({
+      prefix: 'website_tuts/'
+    });
+
+    const videoData = await Promise.all(
+      files.map(async (file) => {
+        const [metadata] = await file.getMetadata();
+        const [url] = await file.getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
+
+        return {
+          name: file.name.split('/').pop(),
+          fullPath: file.name,
+          url: url,
+          size: metadata.size,
+          contentType: metadata.contentType,
+          updated: metadata.updated,
+          created: metadata.timeCreated
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      count: videoData.length,
+      data: videoData
+    });
+  } catch (error) {
+    console.error('Error fetching tutorials:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+
+
+
 //Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
