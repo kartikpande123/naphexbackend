@@ -3202,7 +3202,13 @@ app.post("/api/updatePlayedAmount", async (req, res) => {
     }
 });
 
-// Scheduled function to finalize daily played amounts and update business at 11:55 PM
+
+
+
+
+
+
+// FINALIZE DAILY AMOUNTS
 const finalizeDailyAmounts = async () => {
     try {
         const today = new Date().toISOString().split("T")[0];
@@ -3216,7 +3222,6 @@ const finalizeDailyAmounts = async () => {
             const userId = userSnapshot.key;
             const userData = userSnapshot.val();
 
-            // Store finalized total played amount
             updates[`binaryUsers/${userId}/playedAmounts/${today}`] = userData.totalPlayedAmount || 0;
         });
 
@@ -3227,15 +3232,16 @@ const finalizeDailyAmounts = async () => {
     }
 };
 
-schedule.scheduleJob("55 23 * * *", finalizeDailyAmounts); //11:55
+schedule.scheduleJob("55 23 * * *", finalizeDailyAmounts);
 
 
-// Function to calculate total business for a user left and right update daily
-///////////////////////////////////
+
+// CALCULATE LEFT & RIGHT BUSINESS
 const calculateTotalBusiness = async (userId, date) => {
     const userRef = db.ref(`binaryUsers/${userId}`);
     const userSnapshot = await userRef.once("value");
-    if (!userSnapshot.exists()) return { leftBusiness: 0, rightBusiness: 0, playedAmount: 0 };
+    if (!userSnapshot.exists())
+        return { leftBusiness: 0, rightBusiness: 0, playedAmount: 0 };
 
     const userData = userSnapshot.val();
     const playedAmount = userData.playedAmounts?.[date] || 0;
@@ -3243,7 +3249,6 @@ const calculateTotalBusiness = async (userId, date) => {
     let leftBusiness = 0;
     let rightBusiness = 0;
 
-    // Recursively calculate left and right business
     if (userData.leftChild) {
         const leftData = await calculateTotalBusiness(userData.leftChild, date);
         leftBusiness += leftData.leftBusiness + leftData.rightBusiness + leftData.playedAmount;
@@ -3265,10 +3270,10 @@ const updateBusinessForAllUsers = async () => {
 
         let updates = {};
 
-        for (const [userId, userData] of Object.entries(usersSnapshot.val())) {
-            const { leftBusiness, rightBusiness, playedAmount } = await calculateTotalBusiness(userId, today);
+        for (const [userId] of Object.entries(usersSnapshot.val())) {
+            const { leftBusiness, rightBusiness, playedAmount } =
+                await calculateTotalBusiness(userId, today);
 
-            // Store left and right business in dailyCalculations
             updates[`dailyCalculations/${today}/${userId}/totalLeftBusiness`] = leftBusiness;
             updates[`dailyCalculations/${today}/${userId}/totalRightBusiness`] = rightBusiness;
             updates[`dailyCalculations/${today}/${userId}/totalPlayedAmount`] = playedAmount;
@@ -3281,17 +3286,22 @@ const updateBusinessForAllUsers = async () => {
     }
 };
 
-// Schedule the update to run at 11:55 PM daily
-schedule.scheduleJob("55 23 * * *", updateBusinessForAllUsers); //11:55
+schedule.scheduleJob("55 23 * * *", updateBusinessForAllUsers);
 
-// Bonus Step Levels
-const BONUS_STEPS = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
 
-// Function to calculate bonuses for all users
+// BONUS STEPS
+const BONUS_STEPS = [
+    1000, 2500, 5000, 10000, 25000,
+    50000, 100000, 250000, 500000,
+    1000000, 2500000, 5000000, 10000000
+];
+
+
+//FULL UPDATED BONUS LOGIC (YOUR 2 CHANGES APPLIED)
 const calculateBonuses = async () => {
     try {
         const today = new Date().toISOString().split("T")[0];
-        const usersSnapshot = await db.ref("dailyCalculations/" + today).once("value");
+        const usersSnapshot = await db.ref(`dailyCalculations/${today}`).once("value");
         const usersRef = await db.ref("Users").once("value");
 
         const binaryUsersSnapshot = await db.ref("binaryUsers").once("value");
@@ -3308,49 +3318,43 @@ const calculateBonuses = async () => {
             const binaryUserData = binaryUsers[userId] || {};
             const existingDataSnapshot = await db.ref(`dailyCalculations/${today}/${userId}`).once("value");
             const existingData = existingDataSnapshot.val() || {};
+
             let leftBusiness = existingData.totalLeftBusiness || 0;
             let rightBusiness = existingData.totalRightBusiness || 0;
             let todayPlayedAmount = userData.totalPlayedAmount || 0;
 
-            // ADD PREVIOUS DAY'S CARRY FORWARDS TO TODAY'S BUSINESS
-            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
             const yesterdayCarrySnapshot = await db.ref(`binaryUsers/${userId}/carryForward/${yesterday}`).once("value");
             const yesterdayCarry = yesterdayCarrySnapshot.val() || {};
+
             const leftCarryForward = yesterdayCarry.left || 0;
             const rightCarryForward = yesterdayCarry.right || 0;
 
-            // Add carry forwards to today's business
             leftBusiness += leftCarryForward;
             rightBusiness += rightCarryForward;
 
-            // Get current eligible step (highest step ever achieved)
             let currentEligibleStep = binaryUserData.eligibleStep || 0;
 
-            // Get yesterday's eligible amount to add with today's played amount
             const yesterdayDataSnapshot = await db.ref(`dailyCalculations/${yesterday}/${userId}`).once("value");
             const yesterdayData = yesterdayDataSnapshot.val() || {};
-            
-            // Use the correct field name from your data structure
-            const yesterdayEligibleAmount = yesterdayData.eligibleAmount || yesterdayData.totalEligibleAmount || 0;
 
-            // Calculate total eligible amount: yesterday's eligible + today's played
+            const yesterdayEligibleAmount =
+                yesterdayData.eligibleAmount || yesterdayData.totalEligibleAmount || 0;
+
             let totalEligibleAmount = yesterdayEligibleAmount + todayPlayedAmount;
 
-            // Find the highest step they're eligible for based on total eligible amount
-            let newEligibleStep = currentEligibleStep; // Start with current step (never goes down)
+            let newEligibleStep = currentEligibleStep;
             for (let step of BONUS_STEPS) {
                 if (totalEligibleAmount >= step && step > currentEligibleStep) {
                     newEligibleStep = step;
                 }
             }
 
-            // Update eligible step ONLY if they achieved a higher one (never decrease)
             if (newEligibleStep > currentEligibleStep) {
                 updates[`binaryUsers/${userId}/eligibleStep`] = newEligibleStep;
                 currentEligibleStep = newEligibleStep;
             }
-            
-            // If no previous eligible step exists, set it based on total eligible amount
+
             if (currentEligibleStep === 0) {
                 for (let step of BONUS_STEPS) {
                     if (totalEligibleAmount >= step) {
@@ -3362,74 +3366,58 @@ const calculateBonuses = async () => {
                 }
             }
 
-            // BONUS CALCULATION START
-            // Find the highest bonus step they can get based on:
-            // 1. Their eligible step (highest step they've ever achieved)
-            // 2. Their current left and right business (including carry forwards)
+            // 🔥 BONUS CHECK (UNCHANGED)
             let bonusStepMatched = 0;
             for (let step of BONUS_STEPS.slice().reverse()) {
                 if (step <= currentEligibleStep) {
-                    const leftValid = leftBusiness >= step;
-                    const rightValid = rightBusiness >= step;
-                    if (leftValid && rightValid) {
+                    if (leftBusiness >= step && rightBusiness >= step) {
                         bonusStepMatched = step;
                         break;
                     }
                 }
             }
 
+            // ⭐ FULL AMOUNT BONUS — NO TAX
             let bonusReceived = 0;
             let usedBusiness = 0;
+
             if (bonusStepMatched > 0) {
-                bonusReceived = bonusStepMatched * 0.30;
+                bonusReceived = bonusStepMatched * 0.30; // FULL CREDIT
                 usedBusiness = bonusStepMatched;
             }
 
-            // Deduct tax
-            let gstDeducted = (bonusReceived * 18) / 100;
-            let tdsDeducted = (bonusReceived * 5) / 100;
-            let bonusAfterTax = bonusReceived - gstDeducted - tdsDeducted;
-
-            // New carry forwards for business (after using for bonus)
+            // Carry forward
             let newLeftCarry = leftBusiness - usedBusiness;
             let newRightCarry = rightBusiness - usedBusiness;
-
-            // Ensure carry forwards don't go negative
             if (newLeftCarry < 0) newLeftCarry = 0;
             if (newRightCarry < 0) newRightCarry = 0;
 
-            // Get previous total bonus to calculate cumulative total
             const previousTotalBonus = yesterdayData.totalBonusReceivedTillDate || 0;
-            const newTotalBonusReceivedTillDate = previousTotalBonus + bonusAfterTax;
+            const newTotalBonusReceivedTillDate = previousTotalBonus + bonusReceived;
 
-            // Update fields - now includes carry forward info
+            // ⭐ UPDATED DAILY CALC WITHOUT TAX FIELDS ⭐
             updates[`dailyCalculations/${today}/${userId}`] = {
                 date: today,
-                totalLeftBusiness: existingData.totalLeftBusiness || 0, // Original business without carry forward
-                totalRightBusiness: existingData.totalRightBusiness || 0, // Original business without carry forward
-                leftCarryForward: leftCarryForward,
-                rightCarryForward: rightCarryForward,
-                finalLeftBusiness: leftBusiness, // Business after adding carry forward
-                finalRightBusiness: rightBusiness, // Business after adding carry forward
+                totalLeftBusiness: existingData.totalLeftBusiness || 0,
+                totalRightBusiness: existingData.totalRightBusiness || 0,
+                leftCarryForward,
+                rightCarryForward,
+                finalLeftBusiness: leftBusiness,
+                finalRightBusiness: rightBusiness,
                 totalPlayedAmount: todayPlayedAmount,
-                yesterdayEligibleAmount: yesterdayEligibleAmount,
-                totalEligibleAmount: totalEligibleAmount,
+                yesterdayEligibleAmount,
+                totalEligibleAmount,
                 eligibleStep: currentEligibleStep,
-                bonusStepMatched: bonusStepMatched,
-                bonusReceived,
-                gstDeducted,
-                tdsDeducted,
-                bonusAfterTax,
+                bonusStepMatched,
+                bonusReceived,  // FULL BONUS
                 totalBonusReceivedTillDate: newTotalBonusReceivedTillDate
             };
 
-            // Store carry forwards for next day
             updates[`binaryUsers/${userId}/carryForward/${today}`] = {
                 left: newLeftCarry,
                 right: newRightCarry
             };
 
-            // Find matching user in Users collection and add bonus to tokens
             let matchingUserId = null;
             Object.keys(usersData).forEach(userKey => {
                 if (usersData[userKey]?.userIds?.myuserid === userId) {
@@ -3437,20 +3425,25 @@ const calculateBonuses = async () => {
                 }
             });
 
-            if (matchingUserId && bonusAfterTax > 0) {
-                updates[`Users/${matchingUserId}/tokens`] = admin.database.ServerValue.increment(bonusAfterTax);
+            // ⭐ GIVE BINARY TOKENS (FULL AMOUNT)
+            if (matchingUserId && bonusReceived > 0) {
+                updates[`Users/${matchingUserId}/binaryTokens`] =
+                    admin.database.ServerValue.increment(bonusReceived);
             }
         }
 
         await db.ref().update(updates);
-        console.log("Bonuses calculated, taxes deducted, eligibility steps tracked, and carry forwards updated.");
+        console.log("Bonuses updated with no tax + full credit + binaryTokens.");
     } catch (error) {
         console.error("Error calculating bonuses:", error);
     }
 };
 
-// Schedule the bonus calculation to run at 23:56 daily
 schedule.scheduleJob("56 23 * * *", calculateBonuses);
+
+
+
+
 
 
 
