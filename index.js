@@ -5671,9 +5671,9 @@ app.post("/api/request-withdrawal", async (req, res) => {
       return res.status(400).json({ error: "Insufficient binary tokens" });
     }
 
-    // 🔹 Calculate tax (23%) and final withdrawal
-    const tax = Math.floor(tokens * 0.23);
-    const amountAfterTax = tokens - tax;
+    // 🔹 FIXED TAX (23%) — ALWAYS ONE DECIMAL
+    const tax = parseFloat((tokens * 0.23).toFixed(1));  // <-- FIX
+    const finalTokens = parseFloat((tokens - tax).toFixed(1)); // <-- FIX
 
     // 🔹 Deduct binary tokens from user balance
     await db.ref(`Users/${userKey}`).update({
@@ -5685,8 +5685,7 @@ app.post("/api/request-withdrawal", async (req, res) => {
 
     if (userData.bankingDetails) {
       for (const [id, detail] of Object.entries(userData.bankingDetails)) {
-        const isBank =
-          detail.bankAccountNo && method.includes(detail.bankAccountNo);
+        const isBank = detail.bankAccountNo && method.includes(detail.bankAccountNo);
         const isUpi = detail.upiId && method.includes(detail.upiId);
 
         if (isBank || isUpi) {
@@ -5701,17 +5700,18 @@ app.post("/api/request-withdrawal", async (req, res) => {
       }
     }
 
-    // 🔹 Create withdrawal request inside user node
+    // 🔹 Create withdrawal request
     const withdrawalsRef = db.ref(`Users/${userKey}/withdrawals`);
     const withdrawalId = withdrawalsRef.push().key;
 
     const withdrawalData = {
       requestedTokens: tokens,
       tax: tax,
-      finalTokens: amountAfterTax,
-      method: selectedMethodDetails || { raw: method }, // full bank/upi info
-      status: "pending", // admin updates later
-      tokenType: "binaryTokens", // Add this field to identify it's binary tokens withdrawal
+      finalTokens: finalTokens,
+      taxPercentage: 23,
+      method: selectedMethodDetails || { raw: method },
+      status: "pending",
+      tokenType: "binaryTokens",
       previousBinaryTokens: currentBinaryTokens,
       newBinaryTokens: currentBinaryTokens - tokens,
       createdAt: admin.database.ServerValue.TIMESTAMP,
@@ -5725,11 +5725,13 @@ app.post("/api/request-withdrawal", async (req, res) => {
       withdrawalId,
       withdrawal: withdrawalData,
     });
+
   } catch (error) {
     console.error("Error requesting withdrawal:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // Admin API for Binary Tokens Withdrawal
 app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
@@ -5789,6 +5791,11 @@ app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
+
+
+
+
+
 
 app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
     try {
@@ -6416,10 +6423,22 @@ app.get('/api/tutorials', async (req, res) => {
 //Binary Tokens new wallet apis
 app.post("/api/add-binary-tokens", async (req, res) => {
   try {
-    const { phoneNo, requestedAmount } = req.body;
+    let { phoneNo, requestedAmount } = req.body;
 
-    if (!phoneNo || !requestedAmount) {
+    if (!phoneNo || requestedAmount == null) {
       return res.status(400).json({ error: "phoneNo and requestedAmount are required" });
+    }
+
+    // 🔹 Convert to float (allowing decimals)
+    requestedAmount = parseFloat(requestedAmount);
+
+    if (isNaN(requestedAmount)) {
+      return res.status(400).json({ error: "Requested amount must be a valid number" });
+    }
+
+    // 🔹 Allow only 1 decimal (e.g., 10.5 ok, 10.55 not allowed)
+    if (!/^\d+(\.\d)?$/.test(String(requestedAmount))) {
+      return res.status(400).json({ error: "Only 1 decimal place allowed" });
     }
 
     if (requestedAmount <= 0) {
@@ -6445,28 +6464,26 @@ app.post("/api/add-binary-tokens", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // 🔹 Get current binary tokens and tokens
-    const currentBinaryTokens = userData.binaryTokens || 0;
-    const currentTokens = userData.tokens || 0;
+    const currentBinaryTokens = parseFloat(userData.binaryTokens) || 0;
+    const currentTokens = parseFloat(userData.tokens) || 0;
 
-    // Check if user has sufficient binary tokens
     if (requestedAmount > currentBinaryTokens) {
       return res.status(400).json({ error: "Insufficient binary tokens" });
     }
 
-    // 🔹 Calculate tax (28%) and final tokens to add
-    const tax = Math.floor(requestedAmount * 0.28);
-    const tokensAfterTax = requestedAmount - tax;
+    // 🔹 Calculate tax (28%)
+    const tax = parseFloat((requestedAmount * 0.28).toFixed(1));
+    const tokensAfterTax = parseFloat((requestedAmount - tax).toFixed(1));
 
     // 🔹 Update both binary tokens and tokens
     await db.ref(`Users/${userKey}`).update({
-      binaryTokens: currentBinaryTokens - requestedAmount,
-      tokens: currentTokens + tokensAfterTax
+      binaryTokens: parseFloat((currentBinaryTokens - requestedAmount).toFixed(1)),
+      tokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1)),
     });
 
-    // 🔹 Create binary tokens history record
-    const binaryTokensHistoryRef = db.ref(`Users/${userKey}/binarytokensingame`);
-    const historyId = binaryTokensHistoryRef.push().key;
+    // 🔹 Save history
+    const historyRef = db.ref(`Users/${userKey}/binarytokensingame`);
+    const historyId = historyRef.push().key;
 
     const historyData = {
       id: historyId,
@@ -6475,30 +6492,30 @@ app.post("/api/add-binary-tokens", async (req, res) => {
       tokensAdded: tokensAfterTax,
       taxPercentage: 28,
       previousBinaryTokens: currentBinaryTokens,
-      newBinaryTokens: currentBinaryTokens - requestedAmount,
+      newBinaryTokens: parseFloat((currentBinaryTokens - requestedAmount).toFixed(1)),
       previousTokens: currentTokens,
-      newTokens: currentTokens + tokensAfterTax,
-      date: new Date().toLocaleDateString('en-GB'), // DD/MM/YYYY format
+      newTokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1)),
+      date: new Date().toLocaleDateString("en-GB"),
       timestamp: admin.database.ServerValue.TIMESTAMP,
       type: "transfer_to_tokens",
-      status: "completed"
+      status: "completed",
     };
 
-    await binaryTokensHistoryRef.child(historyId).set(historyData);
+    await historyRef.child(historyId).set(historyData);
 
     res.json({
       success: true,
       message: "Tokens transferred successfully",
       data: {
-        requestedAmount: requestedAmount,
+        requestedAmount,
         taxDeducted: tax,
         tokensAdded: tokensAfterTax,
         previousBinaryTokens: currentBinaryTokens,
-        newBinaryTokens: currentBinaryTokens - requestedAmount,
+        newBinaryTokens: parseFloat((currentBinaryTokens - requestedAmount).toFixed(1)),
         previousTokens: currentTokens,
-        newTokens: currentTokens + tokensAfterTax,
-        transactionId: historyId
-      }
+        newTokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1)),
+        transactionId: historyId,
+      },
     });
 
   } catch (error) {
@@ -6506,6 +6523,271 @@ app.post("/api/add-binary-tokens", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+//won Tokens new wallet apis
+app.post("/api/add-won-tokens", async (req, res) => {
+  try {
+    let { phoneNo, requestedAmount } = req.body;
+
+    if (!phoneNo || requestedAmount == null) {
+      return res.status(400).json({ error: "phoneNo and requestedAmount are required" });
+    }
+
+    // 🔹 Convert to float (allowing decimals)
+    requestedAmount = parseFloat(requestedAmount);
+
+    if (isNaN(requestedAmount)) {
+      return res.status(400).json({ error: "Requested amount must be a valid number" });
+    }
+
+    // 🔹 Allow only 1 decimal (e.g., 10.5 ok, 10.55 not allowed)
+    if (!/^\d+(\.\d)?$/.test(String(requestedAmount))) {
+      return res.status(400).json({ error: "Only 1 decimal place allowed" });
+    }
+
+    if (requestedAmount <= 0) {
+      return res.status(400).json({ error: "Requested amount must be greater than 0" });
+    }
+
+    // 🔹 Find user by phoneNo
+    const usersSnap = await db.ref("Users").once("value");
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 🔹 Get current won tokens and regular tokens
+    const currentWonTokens = parseFloat(userData.wontokens) || 0;
+    const currentTokens = parseFloat(userData.tokens) || 0;
+
+    // Check if user has sufficient won tokens
+    if (requestedAmount > currentWonTokens) {
+      return res.status(400).json({ error: "Insufficient won tokens" });
+    }
+
+    // 🔹 Calculate tax (28%) and final tokens to add with 1 decimal precision
+    const tax = parseFloat((requestedAmount * 0.28).toFixed(1));
+    const tokensAfterTax = parseFloat((requestedAmount - tax).toFixed(1));
+
+    // 🔹 Update both won tokens and regular tokens with 1 decimal precision
+    await db.ref(`Users/${userKey}`).update({
+      wontokens: parseFloat((currentWonTokens - requestedAmount).toFixed(1)),
+      tokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1))
+    });
+
+    // 🔹 Create won tokens history record
+    const wonTokensHistoryRef = db.ref(`Users/${userKey}/wontokensingame`);
+    const historyId = wonTokensHistoryRef.push().key;
+
+    const historyData = {
+      id: historyId,
+      requestedAmount: requestedAmount,
+      taxDeducted: tax,
+      tokensAdded: tokensAfterTax,
+      taxPercentage: 28,
+      previousWonTokens: currentWonTokens,
+      newWonTokens: parseFloat((currentWonTokens - requestedAmount).toFixed(1)),
+      previousTokens: currentTokens,
+      newTokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1)),
+      date: new Date().toLocaleDateString('en-GB'), // DD/MM/YYYY format
+      timestamp: admin.database.ServerValue.TIMESTAMP,
+      type: "transfer_to_tokens",
+      status: "completed"
+    };
+
+    await wonTokensHistoryRef.child(historyId).set(historyData);
+
+    res.json({
+      success: true,
+      message: "Won tokens transferred successfully",
+      data: {
+        requestedAmount: requestedAmount,
+        taxDeducted: tax,
+        tokensAdded: tokensAfterTax,
+        previousWonTokens: currentWonTokens,
+        newWonTokens: parseFloat((currentWonTokens - requestedAmount).toFixed(1)),
+        previousTokens: currentTokens,
+        newTokens: parseFloat((currentTokens + tokensAfterTax).toFixed(1)),
+        transactionId: historyId
+      }
+    });
+
+  } catch (error) {
+    console.error("Error transferring won tokens:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+//APis for wontoken withdrawls
+
+app.post("/api/request-won-withdrawal", async (req, res) => {
+  try {
+    const { phoneNo, tokens, method } = req.body;
+
+    if (!phoneNo || !tokens || !method) {
+      return res.status(400).json({ error: "phoneNo, tokens, and method are required" });
+    }
+
+    // 🔹 Find user by phoneNo
+    const usersSnap = await db.ref("Users").once("value");
+    const users = usersSnap.val();
+
+    let userKey = null;
+    let userData = null;
+
+    for (const [key, user] of Object.entries(users || {})) {
+      if (user.phoneNo === phoneNo) {
+        userKey = key;
+        userData = user;
+        break;
+      }
+    }
+
+    if (!userKey) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 🔹 FIX: Use lowercase 'wontokens' to match database field
+    const currentWonTokens = userData.wontokens || 0;
+
+    if (tokens > currentWonTokens) {
+      return res.status(400).json({ error: "Insufficient won tokens" });
+    }
+
+    // 🔹 UPDATED TAX (30%) — ALWAYS ONE DECIMAL
+    const tax = parseFloat((tokens * 0.30).toFixed(1));  // <-- CHANGED TO 30%
+    const finalTokens = parseFloat((tokens - tax).toFixed(1)); // <-- FIX
+
+    // 🔹 Deduct won tokens from user balance - FIX: use lowercase 'wontokens'
+    await db.ref(`Users/${userKey}`).update({
+      wontokens: currentWonTokens - tokens,
+    });
+
+    // 🔹 Find selected banking/upi details
+    let selectedMethodDetails = null;
+
+    if (userData.bankingDetails) {
+      for (const [id, detail] of Object.entries(userData.bankingDetails)) {
+        const isBank = detail.bankAccountNo && method.includes(detail.bankAccountNo);
+        const isUpi = detail.upiId && method.includes(detail.upiId);
+
+        if (isBank || isUpi) {
+          selectedMethodDetails = {
+            bankAccountNo: detail.bankAccountNo || null,
+            ifsc: detail.ifsc || null,
+            upiId: detail.upiId || null,
+            status: detail.status || "unverified",
+          };
+          break;
+        }
+      }
+    }
+
+    // 🔹 Create withdrawal request under wonWithdrawals collection
+    const wonWithdrawalsRef = db.ref(`Users/${userKey}/wonWithdrawals`);
+    const withdrawalId = wonWithdrawalsRef.push().key;
+
+    const withdrawalData = {
+      requestedTokens: tokens,
+      tax: tax,
+      finalTokens: finalTokens,
+      taxPercentage: 30, // <-- CHANGED TO 30%
+      method: selectedMethodDetails || { raw: method },
+      status: "pending",
+      tokenType: "wonTokens",
+      previousWonTokens: currentWonTokens,
+      newWonTokens: currentWonTokens - tokens,
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+    };
+
+    await wonWithdrawalsRef.child(withdrawalId).set(withdrawalData);
+
+    res.json({
+      success: true,
+      message: "Won tokens withdrawal request submitted successfully",
+      withdrawalId,
+      withdrawal: withdrawalData,
+    });
+
+  } catch (error) {
+    console.error("Error requesting won tokens withdrawal:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+//Admin Api for withdralws requst token
+
+app.patch("/api/won-withdrawals/:userId/:withdrawalId", async (req, res) => {
+  try {
+    const { userId, withdrawalId } = req.params;
+    const { status } = req.body; // expected: "approved" or "rejected"
+
+    if (!status || !["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ success: false, error: "Invalid status" });
+    }
+
+    const withdrawalRef = db.ref(`Users/${userId}/wonWithdrawals/${withdrawalId}`);
+    const withdrawalSnap = await withdrawalRef.once("value");
+
+    if (!withdrawalSnap.exists()) {
+      return res.status(404).json({ success: false, error: "Withdrawal not found" });
+    }
+
+    const withdrawal = withdrawalSnap.val();
+
+    if (withdrawal.status !== "pending") {
+      return res.status(400).json({ success: false, error: "Already processed" });
+    }
+
+    // ✅ If rejected, refund won tokens to user
+    if (status === "rejected") {
+      const userRef = db.ref(`Users/${userId}`);
+      const userSnap = await userRef.once("value");
+
+      if (!userSnap.exists()) {
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
+
+      const userData = userSnap.val();
+      const currentWonTokens = userData.wontokens || 0;
+      const refundTokens = withdrawal.requestedTokens || 0;
+
+      await userRef.update({
+        wontokens: currentWonTokens + refundTokens,
+      });
+    }
+
+    // ✅ Update withdrawal status
+    await withdrawalRef.update({
+      status: status,
+      updatedAt: admin.database.ServerValue.TIMESTAMP,
+    });
+
+    return res.json({
+      success: true,
+      message: `Won tokens withdrawal ${status} successfully`,
+      withdrawalId,
+      status,
+    });
+  } catch (error) {
+    console.error("Error updating won withdrawal:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+
 
 //Server
 app.listen(port, () => {
