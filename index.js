@@ -1974,60 +1974,68 @@ app.post('/api/add-winner-to-wins', async (req, res) => {
     const winnersRef = dbRef.ref('/Winners');
     const usersRef = dbRef.ref('/Users');
 
-    // Fetch all winners
-    const winnersSnapshot = await winnersRef.once('value');
-    const winnersData = winnersSnapshot.val();
+    // Get today's date only
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    
+    // Fetch only today's winners
+    const todayWinnersSnapshot = await winnersRef.child(today).once('value');
+    const todayWinnersData = todayWinnersSnapshot.val();
 
-    if (!winnersData) {
+    if (!todayWinnersData) {
       return res.status(404).json({
         success: false,
-        message: 'No winners found in /Winners collection',
+        message: `No winners found for today (${today})`,
       });
     }
 
     let processedWinnersCount = 0;
+    let skippedWinnersCount = 0;
 
-    // Loop through structure: date → session → userId → gameId → winnerData
-    for (const [date, sessions] of Object.entries(winnersData)) {
-      for (const [sessionKey, users] of Object.entries(sessions)) {
-        for (const [userId, userGames] of Object.entries(users)) {
-          for (const [gameId, winner] of Object.entries(userGames)) {
-            if (!winner || !userId || !gameId) continue;
+    // Process only today's winners
+    for (const [sessionKey, users] of Object.entries(todayWinnersData)) {
+      for (const [userId, userGames] of Object.entries(users)) {
+        for (const [gameId, winner] of Object.entries(userGames)) {
+          if (!winner || !userId || !gameId) continue;
 
-            const {
-              winType,
-              betAmount,
-              amountWon,
-              phoneNo,
-              resultNumbers,
-              selectedNumbers,
-              session,
-              timestamp,
-            } = winner;
-
-            // Reference to user's wins subcollection
-            const userWinsRef = usersRef.child(`${userId}/game1/wins`);
-            const newWinRef = userWinsRef.push();
-
-            // Prepare data
-            const winData = {
-              gameId,
-              session: session || sessionKey,
-              winType: winType || 'N/A',
-              betAmount: betAmount || 0,
-              amountWon: amountWon || 0,
-              phoneNo: phoneNo || null,
-              date: date,
-              resultNumbers: resultNumbers || '',
-              selectedNumbers: selectedNumbers || '',
-              timestamp: timestamp || moment().tz('Asia/Kolkata').valueOf(),
-            };
-
-            // Save to user's wins
-            await newWinRef.set(winData);
-
-            processedWinnersCount++;
+          // Check if this win already exists in user's wins
+          const userWinsRef = usersRef.child(`${userId}/game1/wins`);
+          const userWinsSnapshot = await userWinsRef.orderByChild('gameId').equalTo(gameId).once('value');
+          
+          if (userWinsSnapshot.exists()) {
+            console.log(`⏭️ Win already exists for game ${gameId}, user ${userId}`);
+            skippedWinnersCount++;
+            continue; // Skip if win already exists
           }
+
+          const {
+            winType,
+            betAmount,
+            amountWon,
+            phoneNo,
+            resultNumbers,
+            selectedNumbers,
+            session,
+            timestamp,
+          } = winner;
+
+          // Create new win entry
+          const newWinRef = userWinsRef.push();
+
+          const winData = {
+            gameId,
+            session: session || sessionKey,
+            winType: winType || 'N/A',
+            betAmount: betAmount || 0,
+            amountWon: amountWon || 0,
+            phoneNo: phoneNo || null,
+            date: today, // Use today's date
+            resultNumbers: resultNumbers || '',
+            selectedNumbers: selectedNumbers || '',
+            timestamp: timestamp || moment().tz('Asia/Kolkata').valueOf(),
+          };
+
+          await newWinRef.set(winData);
+          processedWinnersCount++;
         }
       }
     }
@@ -2036,6 +2044,7 @@ app.post('/api/add-winner-to-wins', async (req, res) => {
       success: true,
       message: `Winners added to users' wins successfully`,
       processedWinnersCount,
+      skippedWinnersCount,
     });
   } catch (error) {
     console.error('❌ Error adding winners to wins subcollection:', error);
