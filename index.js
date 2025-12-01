@@ -5746,7 +5746,7 @@ app.post("/api/request-withdrawal", async (req, res) => {
 app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
   try {
     const { userId, withdrawalId } = req.params;
-    const { status } = req.body; // expected: "approved" or "rejected"
+    const { status, transactionId } = req.body; // transactionId is optional
 
     if (!status || !["approved", "rejected"].includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
@@ -5763,6 +5763,17 @@ app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
 
     if (withdrawal.status !== "pending") {
       return res.status(400).json({ success: false, error: "Already processed" });
+    }
+
+    // Prepare update data
+    const updateData = {
+      status: status,
+      updatedAt: admin.database.ServerValue.TIMESTAMP,
+    };
+
+    // Add transactionId only if provided (for both approved and rejected)
+    if (transactionId && transactionId.trim()) {
+      updateData.transactionId = transactionId.trim();
     }
 
     // ✅ If rejected, refund binary tokens to user
@@ -5783,17 +5794,15 @@ app.patch("/api/withdrawals/:userId/:withdrawalId", async (req, res) => {
       });
     }
 
-    // ✅ Update withdrawal status
-    await withdrawalRef.update({
-      status: status,
-      updatedAt: admin.database.ServerValue.TIMESTAMP,
-    });
+    // ✅ Update withdrawal status and transaction ID (if provided)
+    await withdrawalRef.update(updateData);
 
     return res.json({
       success: true,
       message: `Withdrawal ${status} successfully`,
       withdrawalId,
       status,
+      transactionId: updateData.transactionId || null
     });
   } catch (error) {
     console.error("Error updating withdrawal:", error);
@@ -6741,7 +6750,7 @@ app.post("/api/request-won-withdrawal", async (req, res) => {
 app.patch("/api/won-withdrawals/:userId/:withdrawalId", async (req, res) => {
   try {
     const { userId, withdrawalId } = req.params;
-    const { status } = req.body; // expected: "approved" or "rejected"
+    const { status, transactionId } = req.body; // transactionId is optional
 
     if (!status || !["approved", "rejected"].includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid status" });
@@ -6758,6 +6767,17 @@ app.patch("/api/won-withdrawals/:userId/:withdrawalId", async (req, res) => {
 
     if (withdrawal.status !== "pending") {
       return res.status(400).json({ success: false, error: "Already processed" });
+    }
+
+    // Prepare update data
+    const updateData = {
+      status: status,
+      updatedAt: admin.database.ServerValue.TIMESTAMP,
+    };
+
+    // Add transactionId only if provided (for both approved and rejected)
+    if (transactionId && transactionId.trim()) {
+      updateData.transactionId = transactionId.trim();
     }
 
     // ✅ If rejected, refund won tokens to user
@@ -6778,24 +6798,21 @@ app.patch("/api/won-withdrawals/:userId/:withdrawalId", async (req, res) => {
       });
     }
 
-    // ✅ Update withdrawal status
-    await withdrawalRef.update({
-      status: status,
-      updatedAt: admin.database.ServerValue.TIMESTAMP,
-    });
+    // ✅ Update withdrawal status and transaction ID (if provided)
+    await withdrawalRef.update(updateData);
 
     return res.json({
       success: true,
       message: `Won tokens withdrawal ${status} successfully`,
       withdrawalId,
       status,
+      transactionId: updateData.transactionId || null
     });
   } catch (error) {
     console.error("Error updating won withdrawal:", error);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
-
 
 
 //Server
