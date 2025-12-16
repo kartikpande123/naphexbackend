@@ -1967,6 +1967,8 @@ cron.schedule('57 23 * * *', async () => {
 }, {
   timezone: 'Asia/Kolkata'
 });
+
+
 //add wins subcollection to user ds
 app.post('/api/add-winner-to-wins', async (req, res) => {
   try {
@@ -2847,6 +2849,8 @@ const uploadFileToStorage = async (file, fileName, folderPath) => {
     }
 };
 
+
+
 app.post("/api/registerUser", upload.fields([
     { name: 'aadharCard', maxCount: 1 },
     { name: 'panCard', maxCount: 1 },
@@ -3023,7 +3027,7 @@ app.post("/api/registerUser", upload.fields([
             email: email || null,
             password: hashedPassword,
             referralId: referralId || null,
-            tokens: 200,
+            tokens: 1080,
             city,
             state,
             panNumber, // new field added
@@ -4802,9 +4806,11 @@ app.post('/api/submit-order-id', upload.single('screenshot'), async (req, res) =
 
     await db.ref(`entryFeesRequest/${orderId}`).set(requestData);
 
+    // ✅ FIXED: Store transaction ID in user record with correct key name
     await db.ref(`Users/${userKey}`).update({
       entryFee: 'pending',
       entryFeeOrderId: orderId,
+      entryFeeTransactionId: transactionId || 'N/A', // ✅ Correct key name
       entryFeeAmount: amount,
       entryFeeScreenshotUrl: screenshotUrl,
       entryFeeSubmittedAt: admin.database.ServerValue.TIMESTAMP
@@ -4906,9 +4912,11 @@ app.post('/api/admin/verify-entry-fee', async (req, res) => {
         entryFeePaidAt: admin.database.ServerValue.TIMESTAMP,
         entryFeeOrderId: orderId, // Keep the same order ID
         entryFeeAmount: amount,
+        entryFeeTransactionId: transactionId || 'N/A',
         entryFeeAdminNote: adminNote || 'Payment verified and approved',
         // Clear pending submission timestamp
-        entryFeeSubmittedAt: null
+        entryFeeSubmittedAt: null,
+        entryFeeScreenshotUrl: null // Clear screenshot URL after approval
       });
       
       // 2️⃣ Add to user orders subcollection
@@ -4947,13 +4955,8 @@ app.post('/api/admin/verify-entry-fee', async (req, res) => {
         adminNote: adminNote || 'Payment verified and approved'
       });
       
-      // 4️⃣ Create/Update entryFeesRequest record (for history)
-      await db.ref(`entryFeesRequest/${orderId}`).set({
-        phoneNo: phoneNo || userData.phoneNo,
-        userKey,
-        amount,
-        transactionId: transactionId || 'N/A',
-        screenshotFileName: screenshotUrl ? screenshotUrl.split('/').pop() : null,
+      // 4️⃣ Update entryFeesRequest record (for history)
+      await db.ref(`entryFeesRequest/${orderId}`).update({
         status: 'approved',
         approvedAt: admin.database.ServerValue.TIMESTAMP,
         approvedDate: new Date().toISOString(),
@@ -4973,9 +4976,9 @@ app.post('/api/admin/verify-entry-fee', async (req, res) => {
       });
       
     } else {
-     // REJECT CASE
+      // ❌ REJECT CASE - Delete everything
       
-      // Delete screenshot from storage if it exists
+      // 1️⃣ Delete screenshot from storage if it exists
       if (screenshotUrl) {
         try {
           const bucket = admin.storage().bucket();
@@ -5002,23 +5005,32 @@ app.post('/api/admin/verify-entry-fee', async (req, res) => {
         }
       }
       
-      // Clear user's pending entry fee data
-      await db.ref(`Users/${userKey}`).update({
-        entryFee: "unpaid",
-        entryFeeOrderId: null,
-        entryFeeAmount: null,
-        entryFeeSubmittedAt: null,
-        entryFeeScreenshotUrl: null,
-        entryFeeTransactionId: null,
-        entryFeeAdminNote: adminNote || 'Payment verification failed'
+      // 2️⃣ Get all entry fee related keys from user data
+      const entryFeeKeys = [
+        'entryFee',
+        'entryFeeOrderId',
+        'entryFeeAmount',
+        'entryFeeSubmittedAt',
+        'entryFeeScreenshotUrl',
+        'entryFeeTransactionId',
+        'entryFeeAdminNote',
+        'entryFeePaidAt'
+      ];
+      
+      // 3️⃣ Build update object to delete all entry fee keys
+      const updateObj = {};
+      entryFeeKeys.forEach(key => {
+        updateObj[key] = null; // Set to null to delete the key
       });
       
-      // Create/Update entryFeesRequest record as rejected (for history)
-      await db.ref(`entryFeesRequest/${orderId}`).set({
-        phoneNo: phoneNo || userData.phoneNo,
-        userKey,
-        amount,
-        transactionId: transactionId || 'N/A',
+      // Reset entryFee to unpaid (don't delete this one, just reset)
+      updateObj.entryFee = 'unpaid';
+      
+      // 4️⃣ Update user node - delete all entry fee data
+      await db.ref(`Users/${userKey}`).update(updateObj);
+      
+      // 5️⃣ Update entryFeesRequest record as rejected (for history/audit)
+      await db.ref(`entryFeesRequest/${orderId}`).update({
         status: 'rejected',
         rejectedAt: admin.database.ServerValue.TIMESTAMP,
         rejectedDate: new Date().toISOString(),
@@ -5027,7 +5039,7 @@ app.post('/api/admin/verify-entry-fee', async (req, res) => {
       
       res.json({
         success: true,
-        message: "Payment rejected and data cleared successfully."
+        message: "Payment rejected. All user entry fee data has been cleared and screenshot deleted."
       });
     }
     
@@ -5982,138 +5994,147 @@ app.get('/api/user-profile/json/:phoneNo', async (req, res) => {
 
 //APis for deleting user
 // API: Delete a user completely (Admin triggered)
-// app.delete('/api/admin/delete-user/:userIdentifier', async (req, res) => {
-//   try {
-//     const { userIdentifier } = req.params;
 
-//     if (!userIdentifier) {
-//       return res.status(400).json({ success: false, message: 'User identifier is required' });
-//     }
 
-//     const usersRef = db.ref('Users');
-//     const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
 
-//     if (!snapshot.exists()) {
-//       return res.status(404).json({ success: false, message: 'User not found' });
-//     }
 
-//     const userKey = Object.keys(snapshot.val())[0];
-//     const userRef = usersRef.child(userKey);
-//     const userData = snapshot.val()[userKey];
-//     const userIdsData = userData.userIds || {};
-//     const kycData = userData.kyc || {};
-//     const bucket = firebaseAdmin.storage().bucket();
 
-//     // 🔹 1. Delete KYC Documents
-//     const deleteFile = async (url, label) => {
-//       try {
-//         if (!url) return;
-//         let filePath = '';
 
-//         if (url.includes('/o/')) {
-//           filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
-//         } else if (url.includes('/naphex-game.firebasestorage.app/')) {
-//           const parts = url.split('/naphex-game.firebasestorage.app/');
-//           if (parts.length > 1) filePath = parts[1];
-//         }
+app.delete('/api/admin/delete-user/:userIdentifier', async (req, res) => {
+  try {
+    const { userIdentifier } = req.params;
 
-//         if (filePath) {
-//           await bucket.file(filePath).delete();
-//           console.log(`✅ Deleted ${label}: ${filePath}`);
-//         }
-//       } catch (err) {
-//         console.error(`❌ Error deleting ${label}:`, err.message);
-//       }
-//     };
+    if (!userIdentifier) {
+      return res.status(400).json({ success: false, message: 'User identifier is required' });
+    }
 
-//     await Promise.all([
-//       deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
-//       deleteFile(kycData.panCardUrl, 'panCardUrl'),
-//       deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl'),
-//       deleteFile(kycData.selfieUrl, 'selfieUrl'),
-//     ]);
+    const usersRef = db.ref('Users');
+    const snapshot = await usersRef.orderByChild('userIds/myuserid').equalTo(userIdentifier).once('value');
 
-//     // 🔹 2. Remove user from binaryUsers
-//     if (userIdsData.myrefrelid) {
-//       const binaryUsersRef = db.ref('binaryUsers');
-//       const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
+    if (!snapshot.exists()) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
-//       if (binarySnapshot.exists()) {
-//         const binaryKey = Object.keys(binarySnapshot.val())[0];
-//         const binaryData = binarySnapshot.val()[binaryKey];
+    const userKey = Object.keys(snapshot.val())[0];
+    const userRef = usersRef.child(userKey);
+    const userData = snapshot.val()[userKey];
+    const userIdsData = userData.userIds || {};
+    const kycData = userData.kyc || {};
+    const bucket = firebaseAdmin.storage().bucket();
 
-//         if (binaryData.referralId) {
-//           const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
-//           const parentSnap = await parentRef.once('value');
-//           const parentData = parentSnap.val();
+    // 🔹 1. Delete KYC Documents
+    const deleteFile = async (url, label) => {
+      try {
+        if (!url) return;
+        let filePath = '';
 
-//           if (parentData) {
-//             const updates = {};
-//             if (parentData.leftChild === binaryKey) updates.leftChild = null;
-//             if (parentData.rightChild === binaryKey) updates.rightChild = null;
-//             if (Object.keys(updates).length) await parentRef.update(updates);
-//           }
-//         }
+        if (url.includes('/o/')) {
+          filePath = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
+        } else if (url.includes('/naphex-game.firebasestorage.app/')) {
+          const parts = url.split('/naphex-game.firebasestorage.app/');
+          if (parts.length > 1) filePath = parts[1];
+        }
 
-//         await binaryUsersRef.child(binaryKey).remove();
-//         console.log('✅ Removed user from binaryUsers');
-//       }
-//     }
+        if (filePath) {
+          await bucket.file(filePath).delete();
+          console.log(`✅ Deleted ${label}: ${filePath}`);
+        }
+      } catch (err) {
+        console.error(`❌ Error deleting ${label}:`, err.message);
+      }
+    };
 
-//     // 🔹 3. Delete Auth account
-//     try {
-//       let authUser = null;
-//       if (userData.phoneNo) {
-//         try {
-//           authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
-//         } catch {}
-//       }
-//       if (!authUser && userData.email) {
-//         try {
-//           authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
-//         } catch {}
-//       }
+    await Promise.all([
+      deleteFile(kycData.aadharCardUrl, 'aadharCardUrl'),
+      deleteFile(kycData.panCardUrl, 'panCardUrl'),
+      deleteFile(kycData.bankPassbookUrl, 'bankPassbookUrl'),
+      deleteFile(kycData.selfieUrl, 'selfieUrl'),
+    ]);
 
-//       if (authUser) {
-//         await firebaseAdmin.auth().deleteUser(authUser.uid);
-//         console.log(`✅ Deleted Firebase Auth user: ${authUser.uid}`);
-//       }
-//     } catch (err) {
-//       console.error('❌ Firebase Auth deletion error:', err.message);
-//     }
+    // 🔹 2. Remove user from binaryUsers
+    if (userIdsData.myrefrelid) {
+      const binaryUsersRef = db.ref('binaryUsers');
+      const binarySnapshot = await binaryUsersRef.orderByChild('myrefrelid').equalTo(userIdsData.myrefrelid).once('value');
 
-//     // 🔹 4. Delete User Node
-//     await userRef.remove();
-//     console.log(`✅ Removed user data from Users: ${userKey}`);
+      if (binarySnapshot.exists()) {
+        const binaryKey = Object.keys(binarySnapshot.val())[0];
+        const binaryData = binarySnapshot.val()[binaryKey];
 
-//     // 🔹 5. (Optional) Log in deletedusers
-//     const deletedLogRef = db.ref('deletedusers').push();
-//     await deletedLogRef.set({
-//       userId: userIdentifier,
-//       name: userData.name || 'N/A',
-//       phoneNo: userData.phoneNo || 'N/A',
-//       email: userData.email || 'N/A',
-//       deletedAt: new Date().toISOString(),
-//       deletedBy: 'admin',
-//     });
+        if (binaryData.referralId) {
+          const parentRef = db.ref(`binaryUsers/${binaryData.referralId}`);
+          const parentSnap = await parentRef.once('value');
+          const parentData = parentSnap.val();
 
-//     return res.json({
-//       success: true,
-//       message: `User ${userIdentifier} deleted successfully.`,
-//       data: {
-//         userKey,
-//         deletedAt: new Date().toISOString(),
-//       },
-//     });
-//   } catch (error) {
-//     console.error('❌ Delete user error:', error);
-//     return res.status(500).json({
-//       success: false,
-//       message: 'Failed to delete user completely',
-//       error: error.message,
-//     });
-//   }
-// });
+          if (parentData) {
+            const updates = {};
+            if (parentData.leftChild === binaryKey) updates.leftChild = null;
+            if (parentData.rightChild === binaryKey) updates.rightChild = null;
+            if (Object.keys(updates).length) await parentRef.update(updates);
+          }
+        }
+
+        await binaryUsersRef.child(binaryKey).remove();
+        console.log('✅ Removed user from binaryUsers');
+      }
+    }
+
+    // 🔹 3. Delete Auth account
+    try {
+      let authUser = null;
+      if (userData.phoneNo) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByPhoneNumber(`+91${userData.phoneNo}`);
+        } catch {}
+      }
+      if (!authUser && userData.email) {
+        try {
+          authUser = await firebaseAdmin.auth().getUserByEmail(userData.email);
+        } catch {}
+      }
+
+      if (authUser) {
+        await firebaseAdmin.auth().deleteUser(authUser.uid);
+        console.log(`✅ Deleted Firebase Auth user: ${authUser.uid}`);
+      }
+    } catch (err) {
+      console.error('❌ Firebase Auth deletion error:', err.message);
+    }
+
+    // 🔹 4. Delete User Node
+    await userRef.remove();
+    console.log(`✅ Removed user data from Users: ${userKey}`);
+
+    // 🔹 5. (Optional) Log in deletedusers
+    const deletedLogRef = db.ref('deletedusers').push();
+    await deletedLogRef.set({
+      userId: userIdentifier,
+      name: userData.name || 'N/A',
+      phoneNo: userData.phoneNo || 'N/A',
+      email: userData.email || 'N/A',
+      deletedAt: new Date().toISOString(),
+      deletedBy: 'admin',
+    });
+
+    return res.json({
+      success: true,
+      message: `User ${userIdentifier} deleted successfully.`,
+      data: {
+        userKey,
+        deletedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('❌ Delete user error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete user completely',
+      error: error.message,
+    });
+  }
+});
+
+
+
 
 
 //Api add user bank details from bank details component (Bank passbook image and cancelled check image)
