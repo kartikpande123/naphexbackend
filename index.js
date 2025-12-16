@@ -3397,7 +3397,7 @@ const calculateBonuses = async () => {
             let usedBusiness = 0;
 
             if (bonusStepMatched > 0) {
-                bonusReceived = bonusStepMatched * 0.30; // FULL CREDIT
+                bonusReceived = bonusStepMatched * 0.60; // FULL CREDIT
                 usedBusiness = bonusStepMatched;
             }
 
