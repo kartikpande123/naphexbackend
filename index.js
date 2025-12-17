@@ -1846,7 +1846,7 @@ cron.schedule(
 
 
 
-//update game status token updated
+// ✅ UPDATE GAME STATUS — DAILY SAFE VERSION
 app.post('/api/update-game-status', async (req, res) => {
   try {
     const dbRef = firebaseAdmin.database();
@@ -1856,7 +1856,7 @@ app.post('/api/update-game-status', async (req, res) => {
     const now = moment().tz('Asia/Kolkata');
     const today = now.format('YYYY-MM-DD');
 
-    // ✅ Fetch today's winners (now deeply nested by session > user > game)
+    // ✅ Fetch ONLY today's winners
     const winnersSnapshot = await winnersRef.child(today).once('value');
     const winnersData = winnersSnapshot.val();
 
@@ -1867,17 +1867,18 @@ app.post('/api/update-game-status', async (req, res) => {
       });
     }
 
-    // ✅ Extract all winning game IDs from nested structure
+    // ✅ Collect winning gameIds (today only)
     const winningGameIds = [];
+
     for (const [sessionKey, sessionUsers] of Object.entries(winnersData)) {
       for (const [userId, userGames] of Object.entries(sessionUsers)) {
-        for (const [gameId, gameDetails] of Object.entries(userGames)) {
+        for (const [gameId] of Object.entries(userGames)) {
           winningGameIds.push(gameId);
         }
       }
     }
 
-    console.log(`🎯 Found ${winningGameIds.length} winning games for ${today}`);
+    console.log(`🎯 Winning games for ${today}: ${winningGameIds.length}`);
 
     // ✅ Fetch all users
     const usersSnapshot = await usersRef.once('value');
@@ -1892,7 +1893,7 @@ app.post('/api/update-game-status', async (req, res) => {
 
     let totalUpdated = 0;
 
-    // ✅ Iterate through all users
+    // ✅ Iterate through users
     for (const [userId, userData] of Object.entries(usersData)) {
       const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
       const gamesSnapshot = await userGamesRef.once('value');
@@ -1900,42 +1901,50 @@ app.post('/api/update-game-status', async (req, res) => {
 
       if (!gamesData) continue;
 
-      // ✅ Iterate through all the user's games
+      // ✅ Iterate through user's games
       for (const [gameId, gameData] of Object.entries(gamesData)) {
+
+        // 🔒 Keep old behavior
         if (gameData.status !== 'pending') continue;
 
+        // ✅ NEW: process ONLY today's games
+        const gameDate = gameData.timestamp
+          ? moment(gameData.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
+          : null;
+
+        if (gameDate !== today) continue;
+
+        // ✅ Decide win / loss
         if (winningGameIds.includes(gameId)) {
-          // ✅ Mark as "won"
           await userGamesRef.child(gameId).update({ status: 'won' });
 
-          // ✅ Add tokens to wontokens instead of tokens
+          // 🔒 Existing payout logic untouched
           const betAmount = parseFloat(gameData.betAmount) || 0;
-          const wonAmount = betAmount * 10; // Example payout
-          
+          const wonAmount = betAmount * 10;
+
           await usersRef.child(`${userId}/wontokens`).transaction((currentWonTokens) => {
             return (currentWonTokens || 0) + wonAmount;
           });
 
-          console.log(`✅ Game ${gameId} for ${userId} marked as WON - Added ${wonAmount} to wontokens`);
+          console.log(`✅ WON | User: ${userId} | Game: ${gameId}`);
         } else {
-          // ✅ Mark as "lost"
           await userGamesRef.child(gameId).update({ status: 'lost' });
-          console.log(`❌ Game ${gameId} for ${userId} marked as LOST`);
+          console.log(`❌ LOST | User: ${userId} | Game: ${gameId}`);
         }
 
         totalUpdated++;
       }
     }
 
-    // ✅ Send response
     res.status(200).json({
       success: true,
-      message: `${totalUpdated} game statuses updated successfully.`,
+      message: `Game statuses updated for ${today}`,
       totalUpdated,
+      date: today,
     });
 
   } catch (error) {
-    console.error('Error in updating game status:', error);
+    console.error('❌ Error updating game status:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update game statuses',
@@ -1943,6 +1952,7 @@ app.post('/api/update-game-status', async (req, res) => {
     });
   }
 });
+
 
 
 cron.schedule('57 23 * * *', async () => {
