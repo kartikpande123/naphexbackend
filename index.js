@@ -1849,107 +1849,80 @@ cron.schedule(
 // ✅ UPDATE GAME STATUS — DAILY SAFE VERSION
 app.post('/api/update-game-status', async (req, res) => {
   try {
-    const dbRef = firebaseAdmin.database();
-    const usersRef = dbRef.ref('/Users');
-    const winnersRef = dbRef.ref('/Winners');
+    const db = firebaseAdmin.database();
+    const usersRef = db.ref('/Users');
+    const resultsRef = db.ref('/Results');
 
-    const now = moment().tz('Asia/Kolkata');
-    const today = now.format('YYYY-MM-DD');
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
-    // ✅ Fetch ONLY today's winners
-    const winnersSnapshot = await winnersRef.child(today).once('value');
-    const winnersData = winnersSnapshot.val();
+    const resultsSnapshot = await resultsRef.child(today).once('value');
+    const todayResults = resultsSnapshot.val();
 
-    if (!winnersData) {
+    if (!todayResults) {
       return res.status(404).json({
         success: false,
-        message: `No winners found for date ${today}`,
-      });
-    }
-
-    // ✅ Collect winning gameIds (today only)
-    const winningGameIds = [];
-
-    for (const [sessionKey, sessionUsers] of Object.entries(winnersData)) {
-      for (const [userId, userGames] of Object.entries(sessionUsers)) {
-        for (const [gameId] of Object.entries(userGames)) {
-          winningGameIds.push(gameId);
-        }
-      }
-    }
-
-    console.log(`🎯 Winning games for ${today}: ${winningGameIds.length}`);
-
-    // ✅ Fetch all users
-    const usersSnapshot = await usersRef.once('value');
-    const usersData = usersSnapshot.val();
-
-    if (!usersData) {
-      return res.status(404).json({
-        success: false,
-        message: 'No users found',
+        message: 'No results found for today'
       });
     }
 
     let totalUpdated = 0;
 
-    // ✅ Iterate through users
-    for (const [userId, userData] of Object.entries(usersData)) {
-      const userGamesRef = usersRef.child(`${userId}/game1/game-actions`);
-      const gamesSnapshot = await userGamesRef.once('value');
-      const gamesData = gamesSnapshot.val();
+    const usersSnapshot = await usersRef.once('value');
+    const usersData = usersSnapshot.val();
+    if (!usersData) return res.status(404).json({ success: false });
 
-      if (!gamesData) continue;
+    const gameModeMap = {
+      "1-fruits-start": "open-number",
+      "1-fruits-end": "close-number",
+      "2-fruits": "open-close",
+      "3-fruits-start": "open-pana",
+      "3-fruits-end": "close-pana"
+    };
 
-      // ✅ Iterate through user's games
-      for (const [gameId, gameData] of Object.entries(gamesData)) {
+    for (const [userId, user] of Object.entries(usersData)) {
+      const gamesRef = usersRef.child(`${userId}/game1/game-actions`);
+      const gamesSnap = await gamesRef.once('value');
+      const games = gamesSnap.val();
+      if (!games) continue;
 
-        // 🔒 Keep old behavior
-        if (gameData.status !== 'pending') continue;
+      for (const [gameId, game] of Object.entries(games)) {
 
-        // ✅ NEW: process ONLY today's games
-        const gameDate = gameData.timestamp
-          ? moment(gameData.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
+        if (game.status !== 'pending') continue;
+
+        const betDate = game.timestamp
+          ? moment(game.timestamp).tz('Asia/Kolkata').format('YYYY-MM-DD')
           : null;
 
-        if (gameDate !== today) continue;
+        if (betDate !== today) continue;
 
-        // ✅ Decide win / loss
-        if (winningGameIds.includes(gameId)) {
-          await userGamesRef.child(gameId).update({ status: 'won' });
+        const sessionKey = `session${game.sessionNumber}`;
+        const sessionResult = todayResults[sessionKey];
+        if (!sessionResult) continue;
 
-          // 🔒 Existing payout logic untouched
-          const betAmount = parseFloat(gameData.betAmount) || 0;
-          const wonAmount = betAmount * 10;
+        const resultKey = gameModeMap[game.gameMode];
+        const resultValue = sessionResult[resultKey];
+        if (!resultValue) continue;
 
-          await usersRef.child(`${userId}/wontokens`).transaction((currentWonTokens) => {
-            return (currentWonTokens || 0) + wonAmount;
-          });
+        const selected = game.selectedNumbers.join("");
+        const result = resultValue.toString();
 
-          console.log(`✅ WON | User: ${userId} | Game: ${gameId}`);
-        } else {
-          await userGamesRef.child(gameId).update({ status: 'lost' });
-          console.log(`❌ LOST | User: ${userId} | Game: ${gameId}`);
-        }
+        const status = selected === result ? 'won' : 'lost';
 
+        await gamesRef.child(gameId).update({ status });
         totalUpdated++;
       }
     }
 
-    res.status(200).json({
+    res.json({
       success: true,
-      message: `Game statuses updated for ${today}`,
+      message: 'Daily game status updated correctly',
       totalUpdated,
-      date: today,
+      date: today
     });
 
-  } catch (error) {
-    console.error('❌ Error updating game status:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update game statuses',
-      error: error.message,
-    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
