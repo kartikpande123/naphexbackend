@@ -1040,7 +1040,7 @@ async function initializeCollectionIfNeeded() {
 }
 
 // Cron jobs for cleanup
-cron.schedule('35 15 * * *', async () => {
+cron.schedule('35 17 * * *', async () => {
     try {
         const bettedNumbersRef = admin.database().ref('/OpenCloseGameDetails/betted-numbers/session-1');
         await bettedNumbersRef.remove();
